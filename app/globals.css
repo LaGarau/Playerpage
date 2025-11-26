@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  /* --font-heading: var(--font-amita)  */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Custom styles for auth components */
+.auth-inner {
+  width: 400px;
+  margin: auto;
+  background: #ffffff;
+  box-shadow: 0px 14px 80px rgba(34, 35, 58, 0.2);
+  padding: 40px;
+  border-radius: 16px;
+  transition: all 0.3s;
+}
+
+.forgot-password {
+  text-align: right;
+  font-size: 12px;
+  padding-top: 8px;
+  color: #6b7280;
+  margin: 0;
+}
+
+.forgot-password a,
+.forgot-password a:visited {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.forgot-password a:hover {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.continue-p {
+  text-align: center;
+  margin: 16px 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+/* Tailwind background image utility migrated */
+@theme inline {
+  --background-image-my-image: url('/images/background.jpg');
+}
+
+@keyframes zoomIn {
+  0% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+p {
+  font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
+}
