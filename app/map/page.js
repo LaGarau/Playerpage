@@ -5,7 +5,6 @@ import { onValue, ref, push, get } from "firebase/database";
 import { auth, realtimeDb } from "../../lib/firebase";
 import "./map.css";
 import AuthGuard from "../../components/authGuard";
-import { FaQrcode } from "react-icons/fa";
 import dynamic from "next/dynamic";
 
 // Dynamic import to avoid SSR issues
@@ -18,9 +17,7 @@ export default function Home() {
   const [scannedData, setScannedData] = useState(null);
   const scannerRef = useRef(null);
 
-  // -----------------------------
-  // 1️⃣ Fetch QR codes from Firebase
-  // -----------------------------
+  // 1 Fetch QR codes from Firebase
   useEffect(() => {
     const qrRef = ref(realtimeDb, "QR-Data");
     const unsubscribe = onValue(qrRef, snapshot => {
@@ -31,9 +28,8 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-  // -----------------------------
-  // 2️⃣ Fetch scanned QR codes
-  // -----------------------------
+
+  // 2️Fetch scanned QR codes
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -60,9 +56,7 @@ export default function Home() {
     return () => unsubscribe();
   }, [qrList]);
 
-  // -----------------------------
-  // 3️⃣ Scanner logic
-  // -----------------------------
+  // Scanner logic............
   const startScanner = async () => {
     setScanning(true);
     try {
@@ -97,35 +91,21 @@ export default function Home() {
     setScanning(false);
   };
 
-  // -----------------------------
-  // 4️⃣ Save scanned QR
-  // -----------------------------
+  
+  // Save scanned QR — DUPLICATE-PROOF + SAME STRUCTURE
+
   const saveScannedQRCode = async (qrName, qrId) => {
     try {
       const user = auth.currentUser;
       if (!user) return;
 
-      const scansRef = ref(realtimeDb, "scannedQRCodes");
-      const playerStatusRef = ref(realtimeDb, "playerStatus");
+      const userId = user.uid;
 
-      const snapshot = await get(scansRef);
-      const existing = snapshot.val();
+      // Get real username
+      const userSnap = await get(ref(realtimeDb, `Users/${userId}`));
+      const username = userSnap.val()?.username || user.displayName || "guest";
 
-      const alreadyScanned = existing && Object.values(existing).some(
-        scan => scan.qrId === qrId && scan.userId === user.uid
-      );
-      if (alreadyScanned) return;
-
-      // Get username
-      const getUsername = async uid => {
-        return new Promise(resolve => {
-          const userRef = ref(realtimeDb, `Users/${uid}`);
-          onValue(userRef, snap => resolve(snap.val()?.username || "guest"), { onlyOnce: true });
-        });
-      };
-      const username = await getUsername(user.uid);
-
-      // Points parsing
+      // Parse points & clean name (same as before)
       let points = 0;
       let displayQrName = qrName;
       if (qrName.includes("_")) {
@@ -139,15 +119,53 @@ export default function Home() {
       }
 
       const now = new Date();
-      const date = `${now.getMonth()+1}/${now.getDate()}/${now.getFullYear()}`;
+      const date = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
       let hours = now.getHours();
-      const minutes = now.getMinutes().toString().padStart(2,"0");
+      const minutes = now.getMinutes().toString().padStart(2, "0");
       const ampm = hours >= 12 ? "PM" : "AM";
       hours = hours % 12 || 12;
       const time = `${hours}:${minutes} ${ampm}`;
 
-      await push(scansRef, { qrName: displayQrName, qrId, userId: user.uid, username, date, time, points });
-      await push(playerStatusRef, { username, qrName: displayQrName });
+      const scansRef = ref(realtimeDb, "scannedQRCodes");
+      const playerStatusRef = ref(realtimeDb, "playerStatus");
+
+      // CHECK #1: Prevent duplicate in scannedQRCodes
+      const scansSnapshot = await get(scansRef);
+      const existingScans = scansSnapshot.val() || {};
+
+      const alreadyScanned = Object.values(existingScans).some(scan =>
+        scan.userId === userId && scan.qrId === qrId
+      );
+
+      if (!alreadyScanned) {
+        await push(scansRef, {
+          qrName: displayQrName,
+          qrId,
+          userId,
+          username,
+          date,
+          time,
+          points,
+          scannedAt: now.toISOString()
+        });
+      }
+
+      // CHECK #2: Prevent duplicate in playerStatus
+      const statusSnapshot = await get(playerStatusRef);
+      const existingStatus = statusSnapshot.val() || {};
+
+      const alreadyInStatus = Object.values(existingStatus).some(status =>
+        status.username === username && status.qrName === displayQrName
+      );
+
+      if (!alreadyInStatus) {
+        await push(playerStatusRef, {
+          username,
+          qrName: displayQrName,
+          scannedAt: now.toISOString()
+        });
+      }
+
     } catch (err) {
       console.error("Error saving scanned QR:", err);
     }
@@ -168,12 +186,69 @@ export default function Home() {
         )}
 
         {!scanning && !scannedData && (
-          <div className="center-btn flex items-center gap-3">
-            <Link href="/leaderboard" className="bg-yellow-600 text-white px-4 py-2 rounded shadow hover:bg-yellow-500 transition">Leaderboard</Link>
-            <div onClick={startScanner} className="scanner-btn">
-              <FaQrcode size={40} color="#fff" />
+          <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[60%] max-w-md bg-white p-3 rounded-full shadow-lg z-50">
+
+            {/* Leaderboard / Menu */}
+            <Link href="/leaderboard" className="cursor-pointer group flex justify-center items-center w-12 h-12 rounded-full transition-colors duration-300 hover:bg-black">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+                className="text-black group-hover:text-white transition-colors duration-300"
+              >
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </Link>
+
+            {/* QR Scanner Button */}
+            <div
+              onClick={startScanner}
+              className="flex justify-center items-center w-16 h-16 bg-red-600 rounded-full shadow-lg cursor-pointer"
+            >
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                stroke="white"
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+              >
+                <path d="M3 7V3H7" />
+                <path d="M17 3H21V7" />
+                <path d="M3 17V21H7" />
+                <path d="M17 21H21V17" />
+
+                <rect x="8" y="8.5" width="2" height="2" rx="0.5" fill="white" />
+                <rect x="14" y="8.5" width="2" height="2" rx="0.5" fill="white" />
+                <rect x="8" y="13" width="2" height="2" rx="0.5" fill="white" />
+                <rect x="14" y="13" width="2" height="2" rx="0.5" fill="white" />
+              </svg>
             </div>
-            <Link href="/profile" className="bg-black text-white px-4 py-2 rounded shadow hover:bg-white hover:text-black transition">Profile</Link>
+
+            {/* Profile / Home */}
+            <Link href="/profile" className="cursor-pointer group flex justify-center items-center w-12 h-12 rounded-full transition-colors duration-300 hover:bg-black">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+                className="text-black group-hover:text-white transition-colors duration-300"
+              >
+                <path d="M3 10L12 3L21 10" />
+                <path d="M5 10V21H19V10" />
+              </svg>
+            </Link>
+
           </div>
         )}
 
