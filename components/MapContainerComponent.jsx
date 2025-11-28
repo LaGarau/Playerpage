@@ -5,29 +5,38 @@ import { onValue, ref as dbRef, set, get } from "firebase/database";
 import { realtimeDb, auth } from "../lib/firebase";
 
 const DEFAULT_MARKER = "/images/navPointLogo.png";
-const SCANNED_MARKER = "/images/qrpic.png";
 const MARKER_SIZE = 55;
 const BORDER_WIDTH = "3px";
-const DEFAULT_BORDER_COLOR = "#ffffff";
 const HIGHLIGHT_COLOR = "#10B981";
+
+const getBorderColor = (type) => {
+  if (!type) return "black";
+  const typeLower = type.toLowerCase().trim();
+  const colorMap = {
+    demo: "red",
+    event: "pink",
+    sponsor: "blue",
+    special: "white",
+    limited: "green",
+    challenge: "orange",
+  };
+  return colorMap[typeLower] || "black";
+};
 
 export default function QRMapsPage() {
   const galliMapInstance = useRef(null);
-  const markerRefs = useRef({});
-  const scannedQRsRef = useRef({});
+  const markerRefs = useRef({}); 
+
   const [userLocation, setUserLocation] = useState(null);
   const [scannedQRs, setScannedQRs] = useState({});
   const [selectedQR, setSelectedQR] = useState(null);
   const [mapReady, setMapReady] = useState(false);
   const [userId, setUserId] = useState(null);
-  const [username, setUsername] = useState("unknown"); // store username from Users table
+  const [username, setUsername] = useState("unknown");
 
-  // Keep scannedQRsRef updated
-  useEffect(() => {
-    scannedQRsRef.current = scannedQRs || {};
-  }, [scannedQRs]);
-
-  // Get Firebase Auth user
+ 
+  // 1. Auth & Username
+ 
   useEffect(() => {
     const user = auth.currentUser;
     if (user) setUserId(user.uid);
@@ -39,7 +48,24 @@ export default function QRMapsPage() {
     }
   }, []);
 
-  // Get user location
+  useEffect(() => {
+    if (!userId) return;
+    const fetchUsername = async () => {
+      try {
+        const userRef = dbRef(realtimeDb, `Users/${userId}`);
+        const snapshot = await get(userRef);
+        const name = snapshot.val()?.username || "unknown";
+        setUsername(name);
+      } catch (err) {
+        console.error("Failed to fetch username:", err);
+      }
+    };
+    fetchUsername();
+  }, [userId]);
+
+  
+  // 2. User Location
+
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -51,45 +77,30 @@ export default function QRMapsPage() {
     }
   }, []);
 
-  // Fetch username from Users table
+  
+  // 3. playernav – BACK TO YOUR ORIGINAL LOGIC (every 5 sec)
+ 
   useEffect(() => {
-    if (!userId) return;
-
-    const fetchUsername = async () => {
-      try {
-        const userRef = dbRef(realtimeDb, `Users/${userId}`);
-        const snapshot = await get(userRef);
-        const name = snapshot.val()?.username || "unknown";
-        setUsername(name);
-      } catch (err) {
-        console.error("Failed to fetch username:", err);
-      }
-    };
-
-    fetchUsername();
-  }, [userId]);
-
-  // Background player location update every 5 seconds
-  useEffect(() => {
-    if (!userId || !userLocation) return;
+    if (!userId || !userLocation || !username) return;
 
     const updatePlayerLocation = () => {
       const playerNavRef = dbRef(realtimeDb, `playernav/${userId}`);
       const now = new Date();
       set(playerNavRef, {
-        username, // use username from Users table
+        username,
         latitude: userLocation.lat,
         longitude: userLocation.lng,
         datetime: now.toLocaleString(),
       });
     };
 
-    updatePlayerLocation(); // initial update
-    const interval = setInterval(updatePlayerLocation, 5000); // update every 5 sec
+    updatePlayerLocation(); 
+    const interval = setInterval(updatePlayerLocation, 5000);
     return () => clearInterval(interval);
   }, [userId, userLocation, username]);
 
-  // Listen for scanned QR updates (this user only)
+  
+  // 4. Listen to scanned QRs (only reading – no writing here)
   useEffect(() => {
     if (!userId) return;
     const statusRef = dbRef(realtimeDb, `scannedQRCodes/${userId}`);
@@ -101,7 +112,8 @@ export default function QRMapsPage() {
     };
   }, [userId]);
 
-  // Initialize GalliMap
+  // 5. Map Init (unchanged)
+
   useEffect(() => {
     if (!userLocation) return;
 
@@ -131,7 +143,7 @@ export default function QRMapsPage() {
             center: [userLocation.lng, userLocation.lat],
             zoom: 14,
             interactive: true,
-            minZoom: 10,
+            minZoom: 15,
             maxZoom: 20,
           },
           pano: { container: "hidden-pano" },
@@ -161,7 +173,9 @@ export default function QRMapsPage() {
     };
   }, [userLocation]);
 
-  // Load & update markers
+  
+  // 6. Markers (unchanged)
+
   useEffect(() => {
     if (!mapReady) return;
 
@@ -180,26 +194,24 @@ export default function QRMapsPage() {
         const lng = parseFloat(qr.longitude);
         if (isNaN(lat) || isNaN(lng)) return;
 
-        const isScanned = Object.keys(scannedQRsRef.current).some(
-          (k) => k.split(",")[0] === qr.name
-        );
-        const markerImg = isScanned ? SCANNED_MARKER : DEFAULT_MARKER;
+        const markerImageUrl = qr.picture?.trim() ? qr.picture : DEFAULT_MARKER;
+        const borderColor = getBorderColor(qr.type);
 
         if (!markerRefs.current[id]) {
           const marker = galliMapInstance.current.displayPinMarker({ latLng: [lat, lng], color: "#2563EB" });
-          markerRefs.current[id] = marker;
+          markerRefs.current[id] = { marker, type: qr.type };
 
           const waiter = setInterval(() => {
             const el = marker.getElement?.();
             if (el) {
               clearInterval(waiter);
-              el.style.backgroundImage = `url("${markerImg}")`;
+              el.style.backgroundImage = `url("${markerImageUrl}")`;
               el.style.backgroundSize = "cover";
               el.style.backgroundPosition = "center";
               el.style.width = `${MARKER_SIZE}px`;
               el.style.height = `${MARKER_SIZE}px`;
               el.style.borderRadius = "50%";
-              el.style.border = `${BORDER_WIDTH} solid ${isScanned ? HIGHLIGHT_COLOR : DEFAULT_BORDER_COLOR}`;
+              el.style.border = `${BORDER_WIDTH} solid ${borderColor}`;
               el.style.boxShadow = "0 4px 12px rgba(0,0,0,0.3)";
               el.style.transform = "translate(-50%, -50%)";
               el.style.cursor = "pointer";
@@ -207,13 +219,9 @@ export default function QRMapsPage() {
 
               el.onclick = () => {
                 Object.keys(markerRefs.current).forEach((mid) => {
-                  const mEl = markerRefs.current[mid]?.getElement?.();
-                  if (mEl) {
-                    const scanned = Object.keys(scannedQRsRef.current).some(
-                      (k) => k.split(",")[0] === data[mid].name
-                    );
-                    mEl.style.border = `${BORDER_WIDTH} solid ${scanned ? HIGHLIGHT_COLOR : DEFAULT_BORDER_COLOR}`;
-                  }
+                  const { marker: m, type } = markerRefs.current[mid];
+                  const el2 = m.getElement?.();
+                  if (el2) el2.style.border = `${BORDER_WIDTH} solid ${getBorderColor(type)}`;
                 });
                 el.style.border = `${BORDER_WIDTH} solid ${HIGHLIGHT_COLOR}`;
                 galliMapInstance.current.map.flyTo({ center: [lng, lat], zoom: 17, duration: 1500 });
@@ -222,17 +230,19 @@ export default function QRMapsPage() {
             }
           }, 50);
         } else {
-          const el = markerRefs.current[id].getElement?.();
+          const { marker } = markerRefs.current[id];
+          markerRefs.current[id].type = qr.type;
+          const el = marker.getElement?.();
           if (el) {
-            el.style.backgroundImage = `url("${markerImg}")`;
-            el.style.border = `${BORDER_WIDTH} solid ${isScanned ? HIGHLIGHT_COLOR : DEFAULT_BORDER_COLOR}`;
+            el.style.backgroundImage = `url("${markerImageUrl}")`;
+            el.style.border = `${BORDER_WIDTH} solid ${borderColor}`;
           }
         }
       });
 
       Object.keys(markerRefs.current).forEach((id) => {
         if (!activeIds.has(id)) {
-          const marker = markerRefs.current[id];
+          const { marker } = markerRefs.current[id];
           if (marker) {
             if (typeof marker.remove === "function") marker.remove();
             else if (typeof marker.removeMarker === "function") marker.removeMarker();
@@ -246,18 +256,14 @@ export default function QRMapsPage() {
     return () => {
       try { unsubscribe(); } catch (e) {}
     };
-  }, [mapReady, scannedQRs]);
+  }, [mapReady]);
 
   const closePopup = () => {
     setSelectedQR(null);
     Object.keys(markerRefs.current).forEach((id) => {
-      const el = markerRefs.current[id]?.getElement?.();
-      if (el) {
-        const scanned = Object.keys(scannedQRsRef.current).some(
-          (k) => k.split(",")[0] === id
-        );
-        el.style.border = `${BORDER_WIDTH} solid ${scanned ? HIGHLIGHT_COLOR : DEFAULT_BORDER_COLOR}`;
-      }
+      const { marker, type } = markerRefs.current[id];
+      const el = marker.getElement?.();
+      if (el) el.style.border = `${BORDER_WIDTH} solid ${getBorderColor(type)}`;
     });
   };
 
@@ -272,50 +278,40 @@ export default function QRMapsPage() {
 
       {selectedQR && (
         <>
-          <div
-            onClick={closePopup}
-            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 999 }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              background: "white",
-              borderRadius: "12px",
-              padding: "24px",
-              width: "90%",
-              maxWidth: "400px",
-              maxHeight: "80vh",
-              overflowY: "auto",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-              zIndex: 1000,
-            }}
-          >
+          <div onClick={closePopup} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 999 }} />
+          <div style={{
+            position: "absolute",
+            top: "50%", left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "white",
+            borderRadius: "12px",
+            padding: "24px",
+            width: "90%",
+            maxWidth: "400px",
+            maxHeight: "80vh",
+            overflowY: "auto",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+            zIndex: 1000,
+          }}>
             {selectedQR.picture && (
-              <img
-                src={selectedQR.picture || "/dummy.jpg"}
-                alt={selectedQR.name}
-                style={{ width: "100%", height: "200px", objectFit: "cover", borderRadius: "8px", marginBottom: "16px" }}
-              />
+              <img src={selectedQR.picture || "/dummy.jpg"} alt={selectedQR.name}
+                style={{ width: "100%", height: "200px", objectFit: "cover", borderRadius: "8px", marginBottom: "16px" }} />
             )}
             <h2 style={{ margin: "0 0 8px", fontSize: "24px", fontWeight: "bold" }}>
               {selectedQR.name || "Unknown Location"}
             </h2>
-            <p style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: "600", color: "#10B981" }}>
+            <p style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: "600", color: getBorderColor(selectedQR.type) }}>
               Points: {selectedQR.points || 0} {isCurrentlyScanned && " (Already Scanned)"}
+              {selectedQR.type && <span style={{ fontSize: "14px", marginLeft: "8px", opacity: 0.8 }}>• {selectedQR.type}</span>}
             </p>
             <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "16px 0" }} />
             <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#6b7280", lineHeight: "1.6" }}>
               {selectedQR.description || "No description available."}
             </p>
-            <button
-              onClick={closePopup}
+            <button onClick={closePopup}
               style={{ width: "100%", padding: "12px", backgroundColor: "#2563EB", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: "600", cursor: "pointer" }}
               onMouseEnter={(e) => (e.target.style.backgroundColor = "#1d4ed8")}
-              onMouseLeave={(e) => (e.target.style.backgroundColor = "#2563EB")}
-            >
+              onMouseLeave={(e) => (e.target.style.backgroundColor = "#2563EB")}>
               Close
             </button>
           </div>
