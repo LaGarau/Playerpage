@@ -2,7 +2,13 @@
   command = "npm run build"
   publish = ".next"
 
-[build.environment]
-  # Allow Netlify to ignore public Firebase keys (AIza…)
-  SECRETS_SCAN_SMART_DETECTION_ENABLED = "true"
-  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "AIza"
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[functions]
+  included_files = ["public/**", "app/**", "components/**"]
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
