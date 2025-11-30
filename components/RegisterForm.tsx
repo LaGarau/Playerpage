@@ -18,14 +18,38 @@ export default function RegisterForm() {
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
 
+    const trimmedUname = uname.trim();
     const trimmedFname = fname.trim();
     const trimmedLname = lname.trim();
     const trimmedPhone = phone.trim();
+    const trimmedEmail = email.trim();
     const nameRegex = /^[A-Za-z]+$/;
     const phoneRegex = /^(98|97)\d{8}$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    // Validation
+    if (!trimmedUname) {
+      toast.error("Username is required.", { position: "top-center" });
+      return;
+    }
+
+    if (!trimmedFname) {
+      toast.error("First name is required.", { position: "top-center" });
+      return;
+    }
 
     if (!nameRegex.test(trimmedFname)) {
       toast.error("First name should contain letters only.", { position: "top-center" });
+      return;
+    }
+
+    if (trimmedLname && !nameRegex.test(trimmedLname)) {
+      toast.error("Last name should contain letters only.", { position: "top-center" });
+      return;
+    }
+
+    if (!trimmedPhone) {
+      toast.error("Phone number is required.", { position: "top-center" });
       return;
     }
 
@@ -36,8 +60,23 @@ export default function RegisterForm() {
       return;
     }
 
-    if (trimmedLname && !nameRegex.test(trimmedLname)) {
-      toast.error("Last name should contain letters only.", { position: "top-center" });
+    if (!trimmedEmail) {
+      toast.error("Email is required.", { position: "top-center" });
+      return;
+    }
+
+    if (!emailRegex.test(trimmedEmail)) {
+      toast.error("Please enter a valid email address.", { position: "top-center" });
+      return;
+    }
+
+    if (!password) {
+      toast.error("Password is required.", { position: "top-center" });
+      return;
+    }
+
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters long.", { position: "top-center" });
       return;
     }
 
@@ -49,14 +88,16 @@ export default function RegisterForm() {
       }
 
       // Create user in Firebase Auth
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
       const user = userCredential.user;
 
       // Save user + phone index atomically
+      // Note: If this fails, the auth user will exist but no profile data will be saved
+      // In production, consider adding a Cloud Function to handle cleanup
       const updates = {
         [`Users/${user.uid}`]: {
-          username: uname.trim(),
-          email: email.trim(),
+          username: trimmedUname,
+          email: trimmedEmail,
           phone: trimmedPhone,
           firstName: trimmedFname,
           lastName: trimmedLname || "",
@@ -82,6 +123,10 @@ export default function RegisterForm() {
         toast.error("Invalid email address!", { position: "top-center" });
       } else if (error.code === "auth/weak-password") {
         toast.error("Password should be at least 6 characters!", { position: "top-center" });
+      } else if (error.code === "auth/network-request-failed") {
+        toast.error("Network error. Please check your connection and try again.", { position: "top-center" });
+      } else if (error.message === "Phone number already registered!") {
+        toast.error("Phone number already registered!", { position: "top-center" });
       } else {
         // Custom or other errors
         toast.error(error.message || "Something went wrong! Please try again.", { position: "top-center" });

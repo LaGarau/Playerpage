@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { signInWithEmailAndPassword, signInAnonymously } from "firebase/auth";
-import { auth, db } from "../lib/firebase";
-import { setDoc, doc } from "firebase/firestore";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "../lib/firebase";
 import { toast } from "react-toastify";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -54,7 +53,22 @@ export default function LoginForm() {
       router.push("/map");
     } catch (err: any) {
       console.error("Email Login Error:", err);
-      toast.error(err.message || "Login failed", { position: "top-center" });
+      // Handle specific Firebase errors
+      if (err.code === "auth/user-not-found") {
+        toast.error("No account found with this email address!", { position: "top-center" });
+      } else if (err.code === "auth/wrong-password") {
+        toast.error("Incorrect password. Please try again.", { position: "top-center" });
+      } else if (err.code === "auth/invalid-email") {
+        toast.error("Invalid email address!", { position: "top-center" });
+      } else if (err.code === "auth/invalid-credential") {
+        toast.error("Invalid email or password. Please check your credentials.", { position: "top-center" });
+      } else if (err.code === "auth/too-many-requests") {
+        toast.error("Too many failed attempts. Please try again later.", { position: "top-center" });
+      } else if (err.code === "auth/network-request-failed") {
+        toast.error("Network error. Please check your connection.", { position: "top-center" });
+      } else {
+        toast.error(err.message || "Login failed. Please try again.", { position: "top-center" });
+      }
     }
   };
 
