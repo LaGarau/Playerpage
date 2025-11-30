@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { onValue, ref, push, get } from "firebase/database";
@@ -17,7 +18,7 @@ export default function Home() {
   const [scannedData, setScannedData] = useState(null);
   const scannerRef = useRef(null);
 
-  // 1 Fetch QR codes from Firebase
+  // Fetch QR codes from Firebase
   useEffect(() => {
     const qrRef = ref(realtimeDb, "QR-Data");
     const unsubscribe = onValue(qrRef, snapshot => {
@@ -28,8 +29,7 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-
-  // 2️Fetch scanned QR codes
+  // Fetch already scanned QR codes
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
@@ -56,7 +56,7 @@ export default function Home() {
     return () => unsubscribe();
   }, [qrList]);
 
-  // Scanner logic............
+  // Start QR Scanner
   const startScanner = async () => {
     setScanning(true);
     try {
@@ -64,48 +64,59 @@ export default function Home() {
       const html5QrCode = new Html5Qrcode("qr-scanner");
       scannerRef.current = html5QrCode;
 
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1,
+        facingMode: "environment"
+      };
+
       await html5QrCode.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 300, height: 300 } },
-        async decodedText => {
+        config,
+        async (decodedText) => {
           const matched = qrList.find(item => item.id === decodedText || item.name === decodedText);
           const qrInfo = matched || { id: decodedText, name: decodedText };
           setScannedData(qrInfo);
           await saveScannedQRCode(qrInfo.name || qrInfo.id, qrInfo.id);
           stopScanner();
         },
-        err => console.warn("QR Scan Error:", err)
+        (error) => {
+          // Optional: log scan errors (normal during idle scanning)
+          // console.warn("Scan error (normal):", error);
+        }
       );
     } catch (err) {
-      console.error("Scanner failed:", err);
+      console.error("Failed to start scanner:", err);
+      alert("Camera access denied or not available.");
       setScanning(false);
     }
   };
 
+  // Stop Scanner Safely
   const stopScanner = async () => {
     if (scannerRef.current) {
-      await scannerRef.current.stop();
-      scannerRef.current.clear();
+      try {
+        await scannerRef.current.stop();
+        scannerRef.current.clear();
+      } catch (err) {
+        console.warn("Error stopping scanner:", err);
+      }
       scannerRef.current = null;
     }
     setScanning(false);
   };
 
-  
-  // Save scanned QR — DUPLICATE-PROOF + SAME STRUCTURE
-
+  // Save Scanned QR (with duplicate protection)
   const saveScannedQRCode = async (qrName, qrId) => {
     try {
       const user = auth.currentUser;
       if (!user) return;
 
       const userId = user.uid;
-
-      // Get real username
       const userSnap = await get(ref(realtimeDb, `Users/${userId}`));
       const username = userSnap.val()?.username || user.displayName || "guest";
 
-      // Parse points & clean name (same as before)
       let points = 0;
       let displayQrName = qrName;
       if (qrName.includes("_")) {
@@ -120,19 +131,15 @@ export default function Home() {
 
       const now = new Date();
       const date = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
-      let hours = now.getHours();
+      const hours = now.getHours() % 12 || 12;
       const minutes = now.getMinutes().toString().padStart(2, "0");
-      const ampm = hours >= 12 ? "PM" : "AM";
-      hours = hours % 12 || 12;
-      const time = `${hours}:${minutes} ${ampm}`;
+      const time = `${hours}:${minutes} ${now.getHours() >= 12 ? "PM" : "AM"}`;
 
       const scansRef = ref(realtimeDb, "scannedQRCodes");
       const playerStatusRef = ref(realtimeDb, "playerStatus");
 
-      // CHECK #1: Prevent duplicate in scannedQRCodes
       const scansSnapshot = await get(scansRef);
       const existingScans = scansSnapshot.val() || {};
-
       const alreadyScanned = Object.values(existingScans).some(scan =>
         scan.userId === userId && scan.qrId === qrId
       );
@@ -150,10 +157,8 @@ export default function Home() {
         });
       }
 
-      // CHECK #2: Prevent duplicate in playerStatus
       const statusSnapshot = await get(playerStatusRef);
       const existingStatus = statusSnapshot.val() || {};
-
       const alreadyInStatus = Object.values(existingStatus).some(status =>
         status.username === username && status.qrName === displayQrName
       );
@@ -165,7 +170,6 @@ export default function Home() {
           scannedAt: now.toISOString()
         });
       }
-
     } catch (err) {
       console.error("Error saving scanned QR:", err);
     }
@@ -178,28 +182,39 @@ export default function Home() {
       <div className="map-container">
         <MapWithNoSSR mapData={qrList} scannedQRIds={scannedQRIds} />
 
+        {/* QR Scanner Overlay - Beautiful L-shaped corners */}
         {scanning && (
           <div className="scanner-overlay">
-            <button onClick={stopScanner} className="scanner-close">Close</button>
-            <div id="qr-scanner" className="scanner-box" />
+            <div className="overlay-bg"></div>
+
+            <div className="scanner-container">
+              <div className="scanner-box">
+                {/* THIS IS REQUIRED: Camera feed goes here */}
+                <div id="qr-scanner"></div>
+
+                {/* L-shaped corners (on top of video) */}
+                <div className="corner top-left"></div>
+                <div className="corner top-right"></div>
+                <div className="corner bottom-left"></div>
+                <div className="corner bottom-right"></div>
+
+                {/* Animated green scan line */}
+                <div className="scan-line"></div>
+              </div>
+
+
+              <button onClick={stopScanner} className="scanner-close">
+                Close
+              </button>
+            </div>
           </div>
         )}
 
+        {/* Bottom Floating Bar */}
         {!scanning && !scannedData && (
           <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[60%] max-w-md bg-white p-3 rounded-full shadow-lg z-50">
-
-            {/* Leaderboard / Menu */}
-            <Link href="/leaderboard" className="cursor-pointer group flex justify-center items-center w-12 h-12 rounded-full transition-colors duration-300 hover:bg-black">
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                strokeLinecap="round"
-                className="text-black group-hover:text-white transition-colors duration-300"
-              >
+            <Link href="/leaderboard" className="group p-3 rounded-full hover:bg-black transition">
+              <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
                 <line x1="3" y1="6" x2="21" y2="6" />
                 <line x1="3" y1="12" x2="21" y2="12" />
                 <line x1="3" y1="18" x2="21" y2="18" />
@@ -207,24 +222,12 @@ export default function Home() {
             </Link>
 
             {/* QR Scanner Button */}
-            <div
-              onClick={startScanner}
-              className="flex justify-center items-center w-16 h-16 bg-red-600 rounded-full shadow-lg cursor-pointer"
-            >
-              <svg
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                stroke="white"
-                strokeWidth="2"
-                fill="none"
-                strokeLinecap="round"
-              >
+            <div onClick={startScanner} className="flex justify-center items-center w-16 h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
+              <svg width="32" height="32" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none">
                 <path d="M3 7V3H7" />
                 <path d="M17 3H21V7" />
                 <path d="M3 17V21H7" />
                 <path d="M17 21H21V17" />
-
                 <rect x="8" y="8.5" width="2" height="2" rx="0.5" fill="white" />
                 <rect x="14" y="8.5" width="2" height="2" rx="0.5" fill="white" />
                 <rect x="8" y="13" width="2" height="2" rx="0.5" fill="white" />
@@ -232,37 +235,35 @@ export default function Home() {
               </svg>
             </div>
 
-            {/* Profile / Home */}
-            <Link href="/profile" className="cursor-pointer group flex justify-center items-center w-12 h-12 rounded-full transition-colors duration-300 hover:bg-black">
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                strokeLinecap="round"
-                className="text-black group-hover:text-white transition-colors duration-300"
-              >
+            <Link href="/profile" className="group p-3 rounded-full hover:bg-black transition">
+              <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
                 <path d="M3 10L12 3L21 10" />
                 <path d="M5 10V21H19V10" />
               </svg>
             </Link>
-
           </div>
         )}
 
+        {/* Scanned Result Popup */}
         {scannedData && (
-          <div className="result-overlay">
-            <div className="result-text">
-              <h1>{scannedData.name}</h1>
-              {scannedData.description && <p>{scannedData.description}</p>}
-              {scannedData.picture && <img src={scannedData.picture} alt={scannedData.name} className="result-image" />}
-              <button onClick={closeScannedPopup} className="view-map-btn">View on Map</button>
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4"
+          style={{background:'rgba(0,0,0,0.4)'}}>
+            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center">
+              <h1 className="text-black font-bold mb-3">{scannedData.name}</h1>
+              {scannedData.description && <p className="text-black mb-4">{scannedData.description}</p>}
+              {scannedData.picture && <img src={scannedData.picture} alt={scannedData.name} className="w-full rounded-lg mb-6" />}
+              <button
+                onClick={closeScannedPopup}
+                className="bg-black text-white px-8 py-3 rounded-full font-semibold hover:bg-gray-800 transition"
+              >
+                close
+              </button>
             </div>
           </div>
         )}
       </div>
+
+
     </AuthGuard>
   );
 }
