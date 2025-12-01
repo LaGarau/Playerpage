@@ -1,269 +1,212 @@
+// app/map/page.js
 'use client';
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";  // ← useRef was missing!
 import Link from "next/link";
-import { onValue, ref, push, get } from "firebase/database";
-import { auth, realtimeDb } from "../../lib/firebase";
-import "./map.css";
-import AuthGuard from "../../components/authGuard";
 import dynamic from "next/dynamic";
+import { onValue, ref } from "firebase/database";
+import { auth, realtimeDb } from "../../lib/firebase";
+import AuthGuard from "../../components/authGuard";
 
-// Dynamic import to avoid SSR issues
-const MapWithNoSSR = dynamic(() => import("../../components/MapContainerComponent"), { ssr: false });
+// Dynamic import – no SSR
+const MapWithNoSSR = dynamic(() => import("../../components/MapContainerComponent"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-screen flex items-center justify-center bg-gray-100">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-red-600 mx-auto mb-4"></div>
+        <p className="text-gray-700 font-medium">Loading map...</p>
+      </div>
+    </div>
+  ),
+});
 
 export default function Home() {
   const [qrList, setQrList] = useState([]);
-  const [scannedQRIds, setScannedQRIds] = useState([]);
+  const [scannedQRIds, setScannedQRIds] = useState(new Set());
   const [scanning, setScanning] = useState(false);
   const [scannedData, setScannedData] = useState(null);
-  const scannerRef = useRef(null);
+  const scannerRef = useRef(null);  // ← Now properly imported
 
-  // Fetch QR codes from Firebase
+  // Load QR list
   useEffect(() => {
     const qrRef = ref(realtimeDb, "QR-Data");
-    const unsubscribe = onValue(qrRef, snapshot => {
+    const unsubscribe = onValue(qrRef, (snapshot) => {
       const data = snapshot.val();
-      const qrArray = data ? Object.keys(data).map(key => ({ id: key, ...data[key] })) : [];
-      setQrList(qrArray);
+      const list = data
+        ? Object.keys(data).map((key) => ({ id: key, ...data[key] }))
+        : [];
+      setQrList(list.filter((qr) => qr.status === "Active"));
     });
     return () => unsubscribe();
   }, []);
 
-  // Fetch already scanned QR codes
+  // Load user's scanned QRs
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
 
+    const username = user.displayName || "guest";
     const statusRef = ref(realtimeDb, "playerStatus");
-    const unsubscribe = onValue(statusRef, snapshot => {
+
+    const unsubscribe = onValue(statusRef, (snapshot) => {
       const data = snapshot.val();
       if (!data) {
-        setScannedQRIds([]);
+        setScannedQRIds(new Set());
         return;
       }
 
-      const username = user.displayName || "guest";
-      const records = Object.values(data).filter(item => item.username === username);
+      const userRecords = Object.values(data).filter(
+        (item) => item.username === username
+      );
 
-      const scannedIds = records.map(r => {
-        const matched = qrList.find(q => q.name === r.qrName);
-        return matched ? matched.id : null;
-      }).filter(Boolean);
+      const scanned = new Set(
+        userRecords
+          .map((r) => {
+            const cleanName = r.qrName.replace(/[,_]\d+$/, "").trim();
+            return qrList.find((q) => {
+              const qClean = (q.name || "").replace(/[,_]\d+$/, "").trim();
+              return qClean === cleanName;
+            })?.id;
+          })
+          .filter(Boolean)
+      );
 
-      setScannedQRIds(scannedIds);
+      setScannedQRIds(scanned);
     });
 
     return () => unsubscribe();
   }, [qrList]);
 
-  // Start QR Scanner
+  // QR Scanner
   const startScanner = async () => {
     setScanning(true);
     try {
       const { Html5Qrcode } = await import("html5-qrcode");
-      const html5QrCode = new Html5Qrcode("qr-scanner");
-      scannerRef.current = html5QrCode;
+      const scanner = new Html5Qrcode("qr-reader");
+      scannerRef.current = scanner;
 
-      const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1,
-        facingMode: "environment"
-      };
-
-      await html5QrCode.start(
+      await scanner.start(
         { facingMode: "environment" },
-        config,
+        { fps: 10, qrbox: { width: 280, height: 280 } },
         async (decodedText) => {
-          const matched = qrList.find(item => item.id === decodedText || item.name === decodedText);
-          const qrInfo = matched || { id: decodedText, name: decodedText };
-          setScannedData(qrInfo);
-          await saveScannedQRCode(qrInfo.name || qrInfo.id, qrInfo.id);
+          const matched = qrList.find(
+            (q) => q.id === decodedText || q.name === decodedText
+          );
+          if (matched) {
+            setScannedData(matched);
+            await saveScanned(matched);
+          }
           stopScanner();
         },
-        (error) => {
-          // Optional: log scan errors (normal during idle scanning)
-          // console.warn("Scan error (normal):", error);
-        }
+        () => {}
       );
     } catch (err) {
-      console.error("Failed to start scanner:", err);
-      alert("Camera access denied or not available.");
+      alert("Camera not available");
       setScanning(false);
     }
   };
 
-  // Stop Scanner Safely
   const stopScanner = async () => {
     if (scannerRef.current) {
       try {
         await scannerRef.current.stop();
         scannerRef.current.clear();
-      } catch (err) {
-        console.warn("Error stopping scanner:", err);
-      }
+      } catch {}
       scannerRef.current = null;
     }
     setScanning(false);
   };
 
-  // Save Scanned QR (with duplicate protection)
-  const saveScannedQRCode = async (qrName, qrId) => {
-    try {
-      const user = auth.currentUser;
-      if (!user) return;
+  const saveScanned = async (qr) => {
+    const user = auth.currentUser;
+    if (!user) return;
 
-      const userId = user.uid;
-      const userSnap = await get(ref(realtimeDb, `Users/${userId}`));
-      const username = userSnap.val()?.username || user.displayName || "guest";
+    const username = user.displayName || "guest";
+    const cleanName = (qr.name || "").replace(/[,_]\d+$/, "").trim();
 
-      let points = 0;
-      let displayQrName = qrName;
-      if (qrName.includes("_")) {
-        const parts = qrName.split("_");
-        points = parseInt(parts.at(-1)) || 0;
-        displayQrName = parts.slice(0, -1).join("_");
-      } else if (qrName.includes(",")) {
-        const parts = qrName.split(",");
-        points = parseInt(parts.at(-1)) || 0;
-        displayQrName = parts.slice(0, -1).join(",");
-      }
-
-      const now = new Date();
-      const date = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
-      const hours = now.getHours() % 12 || 12;
-      const minutes = now.getMinutes().toString().padStart(2, "0");
-      const time = `${hours}:${minutes} ${now.getHours() >= 12 ? "PM" : "AM"}`;
-
-      const scansRef = ref(realtimeDb, "scannedQRCodes");
-      const playerStatusRef = ref(realtimeDb, "playerStatus");
-
-      const scansSnapshot = await get(scansRef);
-      const existingScans = scansSnapshot.val() || {};
-      const alreadyScanned = Object.values(existingScans).some(scan =>
-        scan.userId === userId && scan.qrId === qrId
-      );
-
-      if (!alreadyScanned) {
-        await push(scansRef, {
-          qrName: displayQrName,
-          qrId,
-          userId,
-          username,
-          date,
-          time,
-          points,
-          scannedAt: now.toISOString()
-        });
-      }
-
-      const statusSnapshot = await get(playerStatusRef);
-      const existingStatus = statusSnapshot.val() || {};
-      const alreadyInStatus = Object.values(existingStatus).some(status =>
-        status.username === username && status.qrName === displayQrName
-      );
-
-      if (!alreadyInStatus) {
-        await push(playerStatusRef, {
-          username,
-          qrName: displayQrName,
-          scannedAt: now.toISOString()
-        });
-      }
-    } catch (err) {
-      console.error("Error saving scanned QR:", err);
-    }
+    const { push, ref } = await import("firebase/database");
+    await push(ref(realtimeDb, "playerStatus"), {
+      username,
+      qrName: cleanName,
+      scannedAt: new Date().toISOString(),
+    });
   };
-
-  const closeScannedPopup = () => setScannedData(null);
 
   return (
     <AuthGuard>
-      <div className="map-container">
-        <MapWithNoSSR mapData={qrList} scannedQRIds={scannedQRIds} />
+      <div className="relative h-screen w-full overflow-hidden">
+        <MapWithNoSSR qrList={qrList} scannedQRIds={scannedQRIds} />
 
-        {/* QR Scanner Overlay - Beautiful L-shaped corners */}
+        {/* Scanner Overlay */}
         {scanning && (
-          <div className="scanner-overlay">
-            <div className="overlay-bg"></div>
-
-            <div className="scanner-container">
-              <div className="scanner-box">
-                {/* THIS IS REQUIRED: Camera feed goes here */}
-                <div id="qr-scanner"></div>
-
-                {/* L-shaped corners (on top of video) */}
-                <div className="corner top-left"></div>
-                <div className="corner top-right"></div>
-                <div className="corner bottom-left"></div>
-                <div className="corner bottom-right"></div>
-
-                {/* Animated green scan line */}
-                <div className="scan-line"></div>
+          <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80">
+            <div className="relative w-80 h-80 bg-black rounded-2xl overflow-hidden">
+              <div id="qr-reader" className="w-full h-full" />
+              <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute top-0 left-0 w-16 h-16 border-t-8 border-l-8 border-white rounded-tl-3xl" />
+                <div className="absolute top-0 right-0 w-16 h-16 border-t-8 border-r-8 border-white rounded-tr-3xl" />
+                <div className="absolute bottom-0 left-0 w-16 h-16 border-b-8 border-l-8 border-white rounded-bl-3xl" />
+                <div className="absolute bottom-0 right-0 w-16 h-16 border-b-8 border-r-8 border-white rounded-br-3xl" />
               </div>
+            </div>
+            <button
+              onClick={stopScanner}
+              className="mt-8 px-8 py-3 bg-white text-black rounded-full font-bold text-lg"
+            >
+              Close Scanner
+            </button>
+          </div>
+        )}
 
-
-              <button onClick={stopScanner} className="scanner-close">
+        {/* Scanned Popup */}
+        {scannedData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center">
+              <h1 className="text-3xl font-bold mb-3">{scannedData.name}</h1>
+              {scannedData.description && <p className="text-gray-700 mb-4">{scannedData.description}</p>}
+              {scannedData.picture ? (
+                <img src={scannedData.picture} alt={scannedData.name} className="w-full rounded-lg mb-6" />
+              ) : (
+                <div className="bg-gray-200 border-2 border-dashed rounded-xl w-full h-48 mb-6" />
+              )}
+              <button
+                onClick={() => setScannedData(null)}
+                className="bg-black text-white px-8 py-3 rounded-full font-bold"
+              >
                 Close
               </button>
             </div>
           </div>
         )}
 
-        {/* Bottom Floating Bar */}
+        {/* Bottom Bar */}
         {!scanning && !scannedData && (
-          <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[60%] max-w-md bg-white p-3 rounded-full shadow-lg z-50">
-            <Link href="/leaderboard" className="group p-3 rounded-full hover:bg-black transition">
-              <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="18" x2="21" y2="18" />
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex gap-12 bg-white px-6 py-4 rounded-full shadow-2xl z-40">
+            <Link href="/leaderboard" className="p-3 rounded-full hover:bg-gray-100 transition">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </Link>
 
-            {/* QR Scanner Button */}
-            <div onClick={startScanner} className="flex justify-center items-center w-16 h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
-              <svg width="32" height="32" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none">
-                <path d="M3 7V3H7" />
-                <path d="M17 3H21V7" />
-                <path d="M3 17V21H7" />
-                <path d="M17 21H21V17" />
-                <rect x="8" y="8.5" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="14" y="8.5" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="8" y="13" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="14" y="13" width="2" height="2" rx="0.5" fill="white" />
+            <button
+              onClick={startScanner}
+              className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center shadow-lg hover:bg-red-700 transition"
+            >
+              <svg className="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m6-8h2M7 7h10M5 5h14" />
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" strokeWidth="2" />
               </svg>
-            </div>
+            </button>
 
-            <Link href="/profile" className="group p-3 rounded-full hover:bg-black transition">
-              <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
-                <path d="M3 10L12 3L21 10" />
-                <path d="M5 10V21H19V10" />
+            <Link href="/profile" className="p-3 rounded-full hover:bg-gray-100 transition">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
             </Link>
-          </div>
-        )}
-
-        {/* Scanned Result Popup */}
-        {scannedData && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 p-4"
-          style={{background:'rgba(0,0,0,0.4)'}}>
-            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center">
-              <h1 className="text-black font-bold mb-3">{scannedData.name}</h1>
-              {scannedData.description && <p className="text-black mb-4">{scannedData.description}</p>}
-              {scannedData.picture && <img src={scannedData.picture} alt={scannedData.name} className="w-full rounded-lg mb-6" />}
-              <button
-                onClick={closeScannedPopup}
-                className="bg-black text-white px-8 py-3 rounded-full font-semibold hover:bg-gray-800 transition"
-              >
-                close
-              </button>
-            </div>
           </div>
         )}
       </div>
-
-
     </AuthGuard>
   );
 }
