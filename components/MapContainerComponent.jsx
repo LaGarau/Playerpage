@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { onValue, ref as dbRef, set, get } from "firebase/database";
 import { realtimeDb, auth } from "../lib/firebase";
+import { triggerHaptic } from "../utils/haptic";
 
 const DEFAULT_MARKER = "/images/navPointLogo.png";
 const MARKER_SIZE = 55;
@@ -23,10 +24,10 @@ const getBorderColor = (type) => {
   return colorMap[typeLower] || "black";
 };
 
+
 export default function QRMapsPage() {
   const galliMapInstance = useRef(null);
-  const markerRefs = useRef({}); 
-
+  const markerRefs = useRef({});
   const [userLocation, setUserLocation] = useState(null);
   const [scannedQRs, setScannedQRs] = useState({});
   const [selectedQR, setSelectedQR] = useState(null);
@@ -34,9 +35,17 @@ export default function QRMapsPage() {
   const [userId, setUserId] = useState(null);
   const [username, setUsername] = useState("unknown");
 
- 
-  // 1. Auth & Username
- 
+  // --- 0. Register Service Worker for caching map tiles ---
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js")
+        .then(() => console.log("Service Worker registered"))
+        .catch((err) => console.error("SW registration failed:", err));
+    }
+  }, []);
+
+
+  // --- 1. Auth & Username ---
   useEffect(() => {
     const user = auth.currentUser;
     if (user) setUserId(user.uid);
@@ -63,13 +72,12 @@ export default function QRMapsPage() {
     fetchUsername();
   }, [userId]);
 
-  
-  // 2. User Location
-
+  // --- 2. User Location ---
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        (pos) =>
+          setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
         () => setUserLocation({ lat: 27.7172, lng: 85.324 })
       );
     } else {
@@ -77,9 +85,7 @@ export default function QRMapsPage() {
     }
   }, []);
 
-  
-  // 3. playernav – BACK TO YOUR ORIGINAL LOGIC (every 5 sec)
- 
+  // --- 3. playernav (every 5 sec) ---
   useEffect(() => {
     if (!userId || !userLocation || !username) return;
 
@@ -94,13 +100,12 @@ export default function QRMapsPage() {
       });
     };
 
-    updatePlayerLocation(); 
+    updatePlayerLocation();
     const interval = setInterval(updatePlayerLocation, 5000);
     return () => clearInterval(interval);
   }, [userId, userLocation, username]);
 
-  
-  // 4. Listen to scanned QRs (only reading – no writing here)
+  // --- 4. Listen to scanned QRs ---
   useEffect(() => {
     if (!userId) return;
     const statusRef = dbRef(realtimeDb, `scannedQRCodes/${userId}`);
@@ -108,12 +113,13 @@ export default function QRMapsPage() {
       setScannedQRs(snap.val() || {});
     });
     return () => {
-      try { unsubscribe(); } catch (e) {}
+      try {
+        unsubscribe();
+      } catch (e) { }
     };
   }, [userId]);
 
-  // 5. Map Init (unchanged)
-
+  // --- 5. Map Init ---
   useEffect(() => {
     if (!userLocation) return;
 
@@ -139,11 +145,11 @@ export default function QRMapsPage() {
           accessToken: "d141e786-97e5-48e7-89e0-7f87e7ed20dd",
           map: {
             container: "galli-map",
-            style: "https://map-init.gallimap.com/styles/light/style.json",
+            // style: "https://map-init.gallimap.com/styles/light/style.json",
             center: [userLocation.lng, userLocation.lat],
             zoom: 14,
             interactive: true,
-            minZoom: 15,
+            minZoom: 14,
             maxZoom: 20,
           },
           pano: { container: "hidden-pano" },
@@ -152,15 +158,20 @@ export default function QRMapsPage() {
 
         galliMapInstance.current = new window.GalliMapPlugin(config);
 
-        galliMapInstance.current.map.on("load", () => {
+        const map = galliMapInstance.current.map;
+        map.on("load", () => {
           setMapReady(true);
-          galliMapInstance.current.map.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 14 });
+          map.flyTo({ center: [userLocation.lng, userLocation.lat], zoom: 14 });
+
+          // Hide unnecessary buttons
+          setTimeout(() => {
+            document
+              .querySelectorAll('button[title*="360"], button[title*="Location"]')
+              .forEach((b) => (b.style.display = "none"));
+          }, 600);
         });
 
-        setTimeout(() => galliMapInstance.current?.map?.resize(), 100);
-        setTimeout(() => {
-          document.querySelectorAll('button[title*="360"], button[title*="Location"]').forEach((b) => (b.style.display = "none"));
-        }, 600);
+        setTimeout(() => map.resize(), 100);
       } catch (err) {
         console.error("Map init failed:", err);
       }
@@ -169,13 +180,13 @@ export default function QRMapsPage() {
     initMap();
 
     return () => {
-      try { galliMapInstance.current?.map?.remove(); } catch (e) {}
+      try {
+        galliMapInstance.current?.map?.remove();
+      } catch (e) { }
     };
   }, [userLocation]);
 
-  
-  // 6. Markers (unchanged)
-
+  // --- 6. Markers ---
   useEffect(() => {
     if (!mapReady) return;
 
@@ -254,12 +265,16 @@ export default function QRMapsPage() {
     });
 
     return () => {
-      try { unsubscribe(); } catch (e) {}
+      try {
+        unsubscribe();
+      } catch (e) { }
     };
   }, [mapReady]);
 
   const closePopup = () => {
+    triggerHaptic(40); // <<< Haptic feedback
     setSelectedQR(null);
+
     Object.keys(markerRefs.current).forEach((id) => {
       const { marker, type } = markerRefs.current[id];
       const el = marker.getElement?.();
@@ -278,42 +293,66 @@ export default function QRMapsPage() {
 
       {selectedQR && (
         <>
-          <div onClick={closePopup} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 999 }} />
-          <div style={{
-            position: "absolute",
-            top: "50%", left: "50%",
-            transform: "translate(-50%, -50%)",
-            background: "white",
-            borderRadius: "12px",
-            padding: "24px",
-            width: "90%",
-            maxWidth: "400px",
-            maxHeight: "80vh",
-            overflowY: "auto",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-            zIndex: 1000,
-          }}>
+          <div
+            onClick={closePopup}
+            style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 999 }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              background: "white",
+              borderRadius: "12px",
+              padding: "24px",
+              width: "90%",
+              maxWidth: "400px",
+              maxHeight: "80vh",
+              overflowY: "auto",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+              zIndex: 1000,
+            }}
+          >
             {selectedQR.picture && (
-              <img src={selectedQR.picture || "/dummy.jpg"} alt={selectedQR.name}
-                style={{ width: "100%", height: "200px", objectFit: "cover", borderRadius: "8px", marginBottom: "16px" }} />
+              <img
+                src={selectedQR.picture || "/dummy.jpg"}
+                alt={selectedQR.name}
+                style={{ width: "100%", height: "200px", objectFit: "cover", borderRadius: "8px", marginBottom: "16px" }}
+              />
             )}
-            <h2 style={{ margin: "0 0 8px", fontSize: "24px", fontWeight: "bold" }}>
+            <h2 style={{ margin: "0 0 8px", fontSize: "24px", fontWeight: "bold", color: "black" }}>
               {selectedQR.name || "Unknown Location"}
             </h2>
-            <p style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: "600", color: getBorderColor(selectedQR.type) }}>
+            <p style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: "600", color: "black" }}>
               Points: {selectedQR.points || 0} {isCurrentlyScanned && " (Already Scanned)"}
-              {selectedQR.type && <span style={{ fontSize: "14px", marginLeft: "8px", opacity: 0.8 }}>• {selectedQR.type}</span>}
             </p>
             <hr style={{ border: "none", borderTop: "1px solid #e5e7eb", margin: "16px 0" }} />
-            <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#6b7280", lineHeight: "1.6" }}>
+            <p style={{ margin: "0 0 20px", fontSize: "16px", color: "black", lineHeight: "1.6" }}>
               {selectedQR.description || "No description available."}
             </p>
-            <button onClick={closePopup}
-              style={{ width: "100%", padding: "12px", backgroundColor: "#2563EB", color: "white", border: "none", borderRadius: "8px", fontSize: "16px", fontWeight: "600", cursor: "pointer" }}
-              onMouseEnter={(e) => (e.target.style.backgroundColor = "#1d4ed8")}
-              onMouseLeave={(e) => (e.target.style.backgroundColor = "#2563EB")}>
+            <button
+              onClick={() => {
+                triggerHaptic(40);
+                closePopup();
+              }}
+              style={{
+                width: "100%",
+                padding: "12px",
+                backgroundColor: "red",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                fontSize: "16px",
+                fontWeight: "600",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => (e.target.style.backgroundColor = "#FF5050")}
+              onMouseLeave={(e) => (e.target.style.backgroundColor = "red")}
+            >
               Close
             </button>
+
           </div>
         </>
       )}
