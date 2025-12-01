@@ -143,6 +143,14 @@ p {
   background-color: #dc264a; /* Darker red on hover */
 }
 
+.maplibregl-ctrl-top-right,.maplibregl-ctrl-bottom-right  {
+  display: none;
+}
+
+.maplibregl-ctrl-bottom-left {
+  top: 5% !important;
+
+}
 
 
 
