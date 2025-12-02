@@ -30,7 +30,7 @@ export default function Home() {
         <img className="w-[200px]" src="/images/Transparent Ghumante Logo.png" alt="Logo" />
       </div>
       <div className="flex flex-col items-center gap-0.5 pt-40 pb-4">
-        <h2 className="text-sm text-black font-semibold tracking-wide">Created By</h2>
+        <h2 className="text-sm font-semibold tracking-wide">Created By</h2>
         <img className="w-[160px]" src="/images/blacklogo.png" alt="Initial Funding Sponsor" />
       </div>
       <div>
