@@ -7,41 +7,14 @@ import { setDoc, doc } from "firebase/firestore";
 import { toast } from "react-toastify";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import SignInWithGoogle from "./SignInWithGoogle";
+
 
 export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const router = useRouter();
 
-  // --- Guest Login ---
-  // const handleGuestLogin = async () => {
-  //   try {
-  //     const result = await signInAnonymously(auth);
-  //     const user = result.user;
-  //     if (!user) throw new Error("Failed to create guest user");
-
-  //     // Create/update guest profile in Firestore
-  //     await setDoc(
-  //       doc(db, "Users", user.uid),
-  //       {
-  //         email: `guest-${user.uid}@temp.com`,
-  //         firstName: "Guest",
-  //         lastName: "User",
-  //         isGuest: true,
-  //         createdAt: new Date().toISOString(),
-  //       },
-  //       { merge: true }
-  //     );
-
-  //     toast.success("Signed in as Guest!", { position: "top-center" });
-  //     router.push("/map");
-  //   } catch (err: any) {
-  //     console.error("Guest Login Error:", err);
-  //     toast.error(err.message || "Failed to sign in as Guest", { position: "top-center" });
-  //   }
-  // };
-
+  
   // --- Email/Password Login ---
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,22 +65,6 @@ export default function LoginForm() {
       <button type="submit" className="w-full bg-black text-white py-2 px-4 rounded-md mb-4">
         Login
       </button>
-
-      {/* <div className="text-center my-3">--Or--</div> */}
-
-      {/* Google Sign-In */}
-      {/* <SignInWithGoogle /> */}
-
-      {/* <div className="w-full mt-4">
-       
-        <button
-          type="button"
-          onClick={handleGuestLogin}
-          className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 px-4 rounded-md"
-        >
-          Try as Guest
-        </button>
-      </div> */}
 
       <div className="text-center my-3">--Or--</div>
 

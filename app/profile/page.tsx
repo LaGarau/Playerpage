@@ -11,6 +11,7 @@ type UserDetails = {
   firstName?: string;
   lastName?: string;
   photo?: string;
+  username?:string;
 };
 
 // Helper functions outside component to avoid Turbopack issues
@@ -165,7 +166,7 @@ export default function ProfilePage() {
         {/* Profile Picture */}
         <div className="relative mb-4">
           <img
-            src={userDetails?.photo || "/images/maskot.png"}
+            src={userDetails?.photo || "/animation/cheer.gif"}
             alt="Profile"
             className="w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover border-4 border-gradient-to-br from-purple-500 to-pink-500 p-1"
           />
@@ -173,9 +174,10 @@ export default function ProfilePage() {
         </div>
 
         {/* Name & Email */}
-        <h2 className="text-xl sm:text-2xl font-semibold mb-1 text-center">
-          {userDetails?.firstName} {userDetails?.lastName}
-        </h2>
+        <h3 className="text-xl sm:text-2xl font-semibold mb-1 text-center ">
+         {userDetails?.username}
+        </h3>
+        
         <p className="text-gray-300 mb-4 sm:mb-6 text-center text-sm sm:text-base">{userDetails?.email}</p>
 
         {/* Totals Card */}

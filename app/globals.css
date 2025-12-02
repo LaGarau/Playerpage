@@ -83,3 +83,15 @@ body {
 p {
   font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif;
 }
+
+
+.maplibregl-ctrl-top-right,.maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left {
+  display: none;
+}
+
+.maplibregl-ctrl-bottom-left {
+  top: 5% !important;
+
+} 
+
+

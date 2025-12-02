@@ -2,210 +2,240 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { onValue, ref, push, get } from "firebase/database";
-import { auth, realtimeDb } from "../../lib/firebase";
-import "./map.css";
-import AuthGuard from "../../components/authGuard";
 import dynamic from "next/dynamic";
+import { onValue, ref, push, set, get } from "firebase/database";
+import { auth, realtimeDb } from "../../lib/firebase";
+import AuthGuard from "../../components/authGuard";
+import LoaderTimer from "../../components/LoaderTimer";
 
-// Dynamic import to avoid SSR issues
-const MapWithNoSSR = dynamic(() => import("../../components/MapContainerComponent"), { ssr: false });
+const MapWithNoSSR = dynamic(
+  () => import("../../components/MapContainerComponent"),
+  { ssr: false }
+);
 
-export default function Home() {
+export default function MapPage() {
+  const [ready, setReady] = useState(false);
   const [qrList, setQrList] = useState([]);
-  const [scannedQRIds, setScannedQRIds] = useState([]);
+  const [scannedQRIds, setScannedQRIds] = useState(new Set());
   const [scanning, setScanning] = useState(false);
   const [scannedData, setScannedData] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const scannerRef = useRef(null);
 
-  // Fetch QR codes from Firebase
+  useEffect(() => {
+  const unsubscribe = auth.onAuthStateChanged((user) => {
+    setCurrentUser(user);
+
+    // Run loader for all users who just logged in
+    if (user && !sessionStorage.getItem('mapLoaderDone')) {
+      setReady(false); // show loader
+
+      // 5-second loader
+      const timer = setTimeout(() => {
+        setReady(true);
+        sessionStorage.setItem('mapLoaderDone', 'true'); // mark loader done
+      }, 5000);
+
+      return () => clearTimeout(timer); // cleanup
+    } else {
+      setReady(true); // already ran, skip loader
+    }
+
+    // reset scanned QR ids
+    setScannedQRIds(new Set());
+  });
+
+  return () => unsubscribe();
+}, []);
+
+  // Load QR list
   useEffect(() => {
     const qrRef = ref(realtimeDb, "QR-Data");
-    const unsubscribe = onValue(qrRef, snapshot => {
+    const unsubscribe = onValue(qrRef, (snapshot) => {
       const data = snapshot.val();
-      const qrArray = data ? Object.keys(data).map(key => ({ id: key, ...data[key] })) : [];
-      setQrList(qrArray);
+      const list = data
+        ? Object.keys(data).map((key) => ({ id: key, ...data[key] }))
+        : [];
+      setQrList(list.filter((qr) => qr.status === "Active"));
     });
     return () => unsubscribe();
   }, []);
 
-  // Fetch already scanned QR codes
+  // Load user's scanned QRs
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) return;
+    if (!currentUser) {
+      setScannedQRIds(new Set());
+      return;
+    }
 
-    const statusRef = ref(realtimeDb, "playerStatus");
-    const unsubscribe = onValue(statusRef, snapshot => {
+    const userId = currentUser.uid;
+    const scannedRef = ref(realtimeDb, "scannedQRCodes");
+
+    const unsubscribe = onValue(scannedRef, (snapshot) => {
       const data = snapshot.val();
       if (!data) {
-        setScannedQRIds([]);
+        setScannedQRIds(new Set());
         return;
       }
 
-      const username = user.displayName || "guest";
-      const records = Object.values(data).filter(item => item.username === username);
+      const userRecords = Object.values(data).filter(
+        (item) => item.userId === userId
+      );
 
-      const scannedIds = records.map(r => {
-        const matched = qrList.find(q => q.name === r.qrName);
-        return matched ? matched.id : null;
-      }).filter(Boolean);
+      const scannedIds = new Set();
+      userRecords.forEach((record) => {
+        const qrName = record.qrName;
+        const found = qrList.find((q) => {
+          const qClean = (q.name || "").replace(/[,_]\d+$/, "").trim();
+          return qClean === qrName;
+        });
+        if (found) scannedIds.add(found.id);
+      });
 
       setScannedQRIds(scannedIds);
     });
 
     return () => unsubscribe();
-  }, [qrList]);
+  }, [qrList, currentUser]);
 
-  // Start QR Scanner
+  // QR Scanner functions
   const startScanner = async () => {
+    if (qrList.length === 0) {
+      alert("QR data not loaded yet, please wait.");
+      return;
+    }
+
     setScanning(true);
+    setScannedData(null);
+
     try {
       const { Html5Qrcode } = await import("html5-qrcode");
-      const html5QrCode = new Html5Qrcode("qr-scanner");
-      scannerRef.current = html5QrCode;
+      const scanner = new Html5Qrcode("qr-scanner");
+      scannerRef.current = scanner;
 
-      const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1,
-        facingMode: "environment"
-      };
-
-      await html5QrCode.start(
+      await scanner.start(
         { facingMode: "environment" },
-        config,
-        async (decodedText) => {
-          const matched = qrList.find(item => item.id === decodedText || item.name === decodedText);
-          const qrInfo = matched || { id: decodedText, name: decodedText };
-          setScannedData(qrInfo);
-          await saveScannedQRCode(qrInfo.name || qrInfo.id, qrInfo.id);
-          stopScanner();
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0,
+          disableFlip: false,
+          videoConstraints: { facingMode: "environment", focusMode: "continuous", advanced: [{ zoom: 1.0 }] }
         },
-        (error) => {
-          // Optional: log scan errors (normal during idle scanning)
-          // console.warn("Scan error (normal):", error);
-        }
+        async (decodedText) => {
+          const match = decodedText.match(/^(.+?)[,_](\d+)$/);
+          const qrName = match ? match[1].trim() : decodedText.trim();
+          const points = match ? parseInt(match[2]) : 0;
+
+          const matched = qrList.find((q) => {
+            const cleanQrName = (q.name || "").replace(/[,_]\d+$/, "").trim().toLowerCase();
+            const qrNameLower = qrName.toLowerCase();
+            return cleanQrName === qrNameLower || (q.name || "").toLowerCase().includes(qrNameLower);
+          });
+
+          if (matched && scannerRef.current) {
+            const alreadyScanned = scannedQRIds.has(matched.id);
+            const currentScanner = scannerRef.current;
+            scannerRef.current = null;
+            await currentScanner.stop();
+            await currentScanner.clear();
+
+            if (alreadyScanned) {
+              setScanning(false);
+              alert(`You have already scanned "${qrName}"!`);
+              return;
+            }
+
+            await saveScanned(matched, decodedText, qrName, points);
+            setScanning(false);
+            setTimeout(() => setScannedData({ ...matched, displayName: qrName, points }), 100);
+          } else if (!matched) {
+            alert(`QR Code detected but not recognized: ${decodedText}`);
+          }
+        },
+        () => { }
       );
     } catch (err) {
-      console.error("Failed to start scanner:", err);
-      alert("Camera access denied or not available.");
+      alert("Camera not available: " + err.message);
       setScanning(false);
     }
   };
 
-  // Stop Scanner Safely
   const stopScanner = async () => {
     if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current.clear();
-      } catch (err) {
-        console.warn("Error stopping scanner:", err);
-      }
+      try { await scannerRef.current.stop(); await scannerRef.current.clear(); } catch { }
       scannerRef.current = null;
     }
     setScanning(false);
   };
 
-  // Save Scanned QR (with duplicate protection)
-  const saveScannedQRCode = async (qrName, qrId) => {
+  const saveScanned = async (qr, originalText, qrName, points) => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const userProfileRef = ref(realtimeDb, `Users/${user.uid}`);
+    const userProfileSnap = await get(userProfileRef);
+    const username = userProfileSnap.exists() ? userProfileSnap.val().username : user.displayName || "guest";
+
+    const now = new Date();
+    const date = now.toLocaleDateString('en-US');
+    const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
     try {
-      const user = auth.currentUser;
-      if (!user) return;
+      await push(ref(realtimeDb, "scannedQRCodes"), { userId: user.uid, username, qrId: originalText, qrName, points, date, time });
+      await push(ref(realtimeDb, "playerStatus"), { username, qrName });
+      await updateUserProfile(user.uid, points);
+    } catch { alert("Failed to save scan. Please try again."); }
+  };
 
-      const userId = user.uid;
-      const userSnap = await get(ref(realtimeDb, `Users/${userId}`));
-      const username = userSnap.val()?.username || user.displayName || "guest";
-
-      let points = 0;
-      let displayQrName = qrName;
-      if (qrName.includes("_")) {
-        const parts = qrName.split("_");
-        points = parseInt(parts.at(-1)) || 0;
-        displayQrName = parts.slice(0, -1).join("_");
-      } else if (qrName.includes(",")) {
-        const parts = qrName.split(",");
-        points = parseInt(parts.at(-1)) || 0;
-        displayQrName = parts.slice(0, -1).join(",");
+  const updateUserProfile = async (userId, pointsToAdd) => {
+    try {
+      const userRef = ref(realtimeDb, `Users/${userId}`);
+      const snapshot = await get(userRef);
+      if (snapshot.exists()) {
+        const userData = snapshot.val();
+        await set(userRef, { ...userData, totalPoints: (userData.totalPoints || 0) + pointsToAdd, qrScanned: (userData.qrScanned || 0) + 1, lastUpdated: new Date().toISOString() });
+      } else {
+        await set(userRef, { totalPoints: pointsToAdd, qrScanned: 1, createdAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
       }
-
-      const now = new Date();
-      const date = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()}`;
-      const hours = now.getHours() % 12 || 12;
-      const minutes = now.getMinutes().toString().padStart(2, "0");
-      const time = `${hours}:${minutes} ${now.getHours() >= 12 ? "PM" : "AM"}`;
-
-      const scansRef = ref(realtimeDb, "scannedQRCodes");
-      const playerStatusRef = ref(realtimeDb, "playerStatus");
-
-      const scansSnapshot = await get(scansRef);
-      const existingScans = scansSnapshot.val() || {};
-      const alreadyScanned = Object.values(existingScans).some(scan =>
-        scan.userId === userId && scan.qrId === qrId
-      );
-
-      if (!alreadyScanned) {
-        await push(scansRef, {
-          qrName: displayQrName,
-          qrId,
-          userId,
-          username,
-          date,
-          time,
-          points,
-          scannedAt: now.toISOString()
-        });
-      }
-
-      const statusSnapshot = await get(playerStatusRef);
-      const existingStatus = statusSnapshot.val() || {};
-      const alreadyInStatus = Object.values(existingStatus).some(status =>
-        status.username === username && status.qrName === displayQrName
-      );
-
-      if (!alreadyInStatus) {
-        await push(playerStatusRef, {
-          username,
-          qrName: displayQrName,
-          scannedAt: now.toISOString()
-        });
-      }
-    } catch (err) {
-      console.error("Error saving scanned QR:", err);
-    }
+    } catch { }
   };
 
   const closeScannedPopup = () => setScannedData(null);
 
+  if (!ready) return <LoaderTimer />;
+
   return (
     <AuthGuard>
-      <div className="map-container">
-        <MapWithNoSSR mapData={qrList} scannedQRIds={scannedQRIds} />
+      <div className="relative h-screen w-full overflow-hidden">
+        <MapWithNoSSR qrList={qrList} scannedQRIds={scannedQRIds} />
 
-        {/* QR Scanner Overlay - Beautiful L-shaped corners */}
+        {/* QR Scanner Overlay */}
         {scanning && (
-          <div className="scanner-overlay">
-            <div className="overlay-bg"></div>
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.9)' }}>
+            <div style={{ position: 'relative', width: '320px', height: '240px', margin: '0 auto' }}>
+              <div id="qr-scanner" style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}></div>
+            </div>
+            <button
+              onClick={stopScanner}
+              style={{ marginTop: '40px', padding: '12px 40px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '9999px', fontSize: '16px', fontWeight: '600', cursor: 'pointer', transition: 'background-color 0.3s' }}
+              onMouseOver={(e) => e.target.style.backgroundColor = '#dc2626'}
+              onMouseOut={(e) => e.target.style.backgroundColor = '#ef4444'}
+            >Close Scanner</button>
+          </div>
+        )}
 
-            <div className="scanner-container">
-              <div className="scanner-box">
-                {/* THIS IS REQUIRED: Camera feed goes here */}
-                <div id="qr-scanner"></div>
-
-                {/* L-shaped corners (on top of video) */}
-                <div className="corner top-left"></div>
-                <div className="corner top-right"></div>
-                <div className="corner bottom-left"></div>
-                <div className="corner bottom-right"></div>
-
-                {/* Animated green scan line */}
-                <div className="scan-line"></div>
+        {/* Scanned Popup */}
+        {scannedData && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
+              <div className="cheer"><img src="/animation/cheer.gif" alt="Congratulation" /></div>
+              <h1 className="text-2xl font-bold text-gray-800 mb-2">{scannedData.displayName}</h1>
+              <div className="mb-6">
+                <p className="text-gray-600 text-lg">You have earned</p>
+                <p className="text-4xl font-bold text-green-600 mt-1">{scannedData.points} {scannedData.points === 1 ? 'point' : 'points'}</p>
               </div>
-
-
-              <button onClick={stopScanner} className="scanner-close">
-                Close
-              </button>
+              <button onClick={closeScannedPopup} className="bg-green-600 text-white px-10 py-3 rounded-full font-semibold hover:bg-green-700 transition w-full">Continue</button>
             </div>
           </div>
         )}
@@ -221,7 +251,6 @@ export default function Home() {
               </svg>
             </Link>
 
-            {/* QR Scanner Button */}
             <div onClick={startScanner} className="flex justify-center items-center w-16 h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
               <svg width="32" height="32" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none">
                 <path d="M3 7V3H7" />
@@ -244,26 +273,13 @@ export default function Home() {
           </div>
         )}
 
-        {/* Scanned Result Popup */}
-        {scannedData && (
-          <div className="fixed inset-0 flex items-center justify-center z-50 p-4"
-          style={{background:'rgba(0,0,0,0.4)'}}>
-            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center">
-              <h1 className="text-black font-bold mb-3">{scannedData.name}</h1>
-              {scannedData.description && <p className="text-black mb-4">{scannedData.description}</p>}
-              {scannedData.picture && <img src={scannedData.picture} alt={scannedData.name} className="w-full rounded-lg mb-6" />}
-              <button
-                onClick={closeScannedPopup}
-                className="bg-black text-white px-8 py-3 rounded-full font-semibold hover:bg-gray-800 transition"
-              >
-                close
-              </button>
-            </div>
-          </div>
-        )}
+        <style jsx>{`
+          @keyframes scan {
+            0%, 100% { transform: translateY(-100px); }
+            50% { transform: translateY(100px); }
+          }
+        `}</style>
       </div>
-
-
     </AuthGuard>
   );
 }
