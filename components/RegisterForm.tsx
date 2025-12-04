@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, realtimeDb } from "../lib/firebase";
 import { ref, get, update } from "firebase/database";
@@ -14,6 +14,80 @@ export default function RegisterForm() {
   const [password, setPassword] = useState("");
   const [fname, setFname] = useState("");
   const [lname, setLname] = useState("");
+  const [usernameError, setUsernameError] = useState("");
+  const [isCheckingUsername, setIsCheckingUsername] = useState(false);
+
+  // Check username uniqueness
+  const checkUsernameAvailability = useCallback(async (username: string) => {
+    const trimmedUsername = username.trim().toLowerCase();
+    
+    if (!trimmedUsername) {
+      setUsernameError("");
+      return true;
+    }
+
+    setIsCheckingUsername(true);
+    try {
+      const usernameSnapshot = await get(ref(realtimeDb, `UsernameIndex/${trimmedUsername}`));
+      if (usernameSnapshot.exists()) {
+        setUsernameError("This username is already taken. Please choose another one.");
+        setIsCheckingUsername(false);
+        return false;
+      } else {
+        setUsernameError("");
+        setIsCheckingUsername(false);
+        return true;
+      }
+    } catch (error: any) {
+      console.error("Error checking username:", error);
+      setUsernameError("Error checking username availability. Please try again.");
+      setIsCheckingUsername(false);
+      return false;
+    }
+  }, []);
+
+  // Debounce username checking
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Clear previous timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    const trimmedUsername = uname.trim();
+    
+    // Reset error when username is empty
+    if (!trimmedUsername) {
+      setUsernameError("");
+      return;
+    }
+
+    // Only check if username is at least 3 characters
+    if (trimmedUsername.length >= 3) {
+      debounceTimerRef.current = setTimeout(() => {
+        checkUsernameAvailability(trimmedUsername);
+      }, 500);
+    }
+
+    // Cleanup function
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [uname, checkUsernameAvailability]);
+
+  // Handle username input change
+  const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setUname(value);
+    
+    // Reset error when user starts typing
+    if (usernameError) {
+      setUsernameError("");
+    }
+  };
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -41,7 +115,27 @@ export default function RegisterForm() {
       return;
     }
 
+    const trimmedUsername = uname.trim();
+    if (!trimmedUsername) {
+      toast.error("Username is required.", { position: "top-center" });
+      return;
+    }
+
+    // Prevent submission if there's a username error
+    if (usernameError) {
+      toast.error("Please fix the username error before submitting.", { position: "top-center" });
+      return;
+    }
+
     try {
+      // 🔍 Check if username already exists via dedicated index node (case-insensitive)
+      const usernameSnapshot = await get(ref(realtimeDb, `UsernameIndex/${trimmedUsername.toLowerCase()}`));
+      if (usernameSnapshot.exists()) {
+        setUsernameError("This username is already taken. Please choose another one.");
+        toast.error("This username is already taken. Please choose another one.", { position: "top-center" });
+        return;
+      }
+
       // 🔍 Check if phone already exists via dedicated index node
       const phoneSnapshot = await get(ref(realtimeDb, `PhoneIndex/${trimmedPhone}`));
       if (phoneSnapshot.exists()) {
@@ -52,10 +146,10 @@ export default function RegisterForm() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Save user + phone index atomically
+      // Save user + phone index + username index atomically
       const updates = {
         [`Users/${user.uid}`]: {
-          username: uname.trim(),
+          username: trimmedUsername,
           email: email.trim(),
           phone: trimmedPhone,
           firstName: trimmedFname,
@@ -67,6 +161,7 @@ export default function RegisterForm() {
           points_earned: 0,
         },
         [`PhoneIndex/${trimmedPhone}`]: user.uid,
+        [`UsernameIndex/${trimmedUsername.toLowerCase()}`]: user.uid,
       };
       await update(ref(realtimeDb), updates);
 
@@ -95,11 +190,27 @@ export default function RegisterForm() {
         <label className="block text-sm font-bold text-black mb-2">Username</label>
         <input
           type="text"
-          className="w-full px-3 py-2 border text-black border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-4"
+          className={`w-full px-3 py-2 border text-black rounded-md focus:outline-none focus:ring-2 focus:border-transparent mb-1 ${
+            usernameError 
+              ? "border-red-500 focus:ring-red-500" 
+              : "border-gray-300 focus:ring-blue-500"
+          }`}
           placeholder="Enter your username"
-          onChange={(e) => setUname(e.target.value)}
+          value={uname}
+          onChange={handleUsernameChange}
+          onBlur={() => {
+            if (uname.trim()) {
+              checkUsernameAvailability(uname.trim());
+            }
+          }}
           required
         />
+        {isCheckingUsername && (
+          <p className="text-sm text-gray-500 mb-2">Checking username availability...</p>
+        )}
+        {usernameError && (
+          <p className="text-sm text-red-500 mb-2">{usernameError}</p>
+        )}
       </div>
 
       <div className="mb-4">
@@ -176,3 +287,4 @@ export default function RegisterForm() {
     </form>
   );
 }
+
