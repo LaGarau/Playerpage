@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[functions]
+  included_files = ["public/**", "app/**", "components/**"]
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
