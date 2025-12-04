@@ -315,7 +315,7 @@ export default function MapPage() {
                       rel="noopener noreferrer"
                       className="mt-2 w-full inline-block px-10 py-3 text-white font-semibold rounded-full shadow-md transition text-center"
                       style={{
-                        backgroundColor: "#FFE0B2",
+                        backgroundColor: "#FF6B35",
                       }}
                       onMouseEnter={e => (e.currentTarget.style.backgroundColor = "#f55b23")} 
                       onMouseLeave={e => (e.currentTarget.style.backgroundColor = "#FF6B35")}
