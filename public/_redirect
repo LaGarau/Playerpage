@@ -1,0 +1,12 @@
+# --- REAL ROUTES (allow them) ---
+/login         /login          200
+/register      /register       200
+/map           /map            200
+/profile       /profile        200
+/leaderboard   /leaderboard    200
+
+# --- ROOT should load the SPA ---
+/              /index.html     200
+
+# --- ANYTHING ELSE → redirect to login ---
+/*            /login           302
