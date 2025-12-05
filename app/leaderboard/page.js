@@ -58,7 +58,6 @@ export default function Leaderboard() {
 
       const players = Object.keys(data).map((uid) => ({
         id: uid,
-        rank: Number(data[uid].rank),
         username: data[uid].player_name,
         time_taken: data[uid].formatted_time_span || "—",
         points: Number(data[uid].total_points) || 0,
@@ -77,7 +76,13 @@ export default function Leaderboard() {
         return parseTime(a.time_taken) - parseTime(b.time_taken);
       });
 
-      setLeaderboardData(sorted);
+      // Assign ranks dynamically based on sorted position
+      const rankedPlayers = sorted.map((player, index) => ({
+        ...player,
+        rank: index + 1
+      }));
+
+      setLeaderboardData(rankedPlayers);
       setLoading(false);
     });
 
@@ -92,9 +97,6 @@ export default function Leaderboard() {
       </div>
     );
   }
-
-  const currentPlayer = leaderboardData.find(p => p.id === currentUser?.uid);
-  const otherPlayers = leaderboardData.filter(p => p.id !== currentUser?.uid);
 
   return (
     <div className="h-screen bg-white flex flex-col overflow-hidden">
