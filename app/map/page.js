@@ -547,7 +547,7 @@ export default function MapPage() {
                 )}
               </div>
               <h1 className="text-2xl font-bold text-gray-800 mb-2">
-                {rewardNotif.isDefault ? "🎉 Points Claimed!" : "🎁 Congratulations!"}
+                {rewardNotif.isDefault ? "🎉 Points Claimed!" : ""}
               </h1>
               <p className="text-gray-700 font-semibold text-lg mt-2 whitespace-pre-line">{rewardNotif.message}</p>
 
