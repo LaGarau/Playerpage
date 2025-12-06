@@ -554,7 +554,7 @@ export default function MapPage() {
               {/* Show Prize Code if available */}
               {!rewardNotif.isDefault && rewardNotif.prizeCode && (
                 <div className="mt-4 p-4 bg-yellow-50 border-2 border-yellow-400 rounded-lg">
-                  <p className="text-sm text-gray-600 mb-1">Your Prize Code:</p>
+                  <p className="text-sm text-gray-600 mb-1">explore remaining qr code for grand prize</p>
                   <p className="text-2xl font-bold text-yellow-600 tracking-wider">{rewardNotif.prizeCode}</p>
                 </div>
               )}
