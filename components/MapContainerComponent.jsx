@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { onValue, ref as dbRef, set, get } from "firebase/database";
+import { useEffect, useRef, useState } from "react";
+import { onValue, ref as dbRef, set, get, update } from "firebase/database";
 import { realtimeDb, auth } from "../lib/firebase";
 
 const DEFAULT_MARKER = "/images/navPointLogo.png";
@@ -37,10 +37,126 @@ export default function FastMapComponent({ qrList, scannedQRIds }) {
   const [mapReady, setMapReady] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [selectedQR, setSelectedQR] = useState(null);
+  const [checkingReward, setCheckingReward] = useState(false);
+  const [rewardPopup, setRewardPopup] = useState(null);
 
   const PLAYER_MARKER_SIZE = 50;
   const PLAYER_MARKER_ICON = "/images/playerlocation.png";
   const playerMarkerRef = useRef(null);
+
+  // --- Check reward for SPECIFIC QR from Firebase notifications ---
+  const checkReward = async (qrName) => {
+    setCheckingReward(true);
+
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setRewardPopup({ 
+          type: "error", 
+          message: "Please login to check rewards" 
+        });
+        setCheckingReward(false);
+        return;
+      }
+
+      // Get username
+      const userProfileRef = dbRef(realtimeDb, `Users/${user.uid}`);
+      const userProfileSnap = await get(userProfileRef);
+      const username = userProfileSnap.exists() 
+        ? userProfileSnap.val().username 
+        : user.displayName || "guest";
+
+      console.log("Checking reward for:", { username, qrName });
+
+      // Check notifications table
+      const notifRef = dbRef(realtimeDb, "notifications");
+      const snapshot = await get(notifRef);
+
+      if (snapshot.exists()) {
+        const notifications = snapshot.val();
+        let foundReward = null;
+        let notifKey = null;
+
+        // Search for matching notification (username + qrName)
+        // IMPORTANT: Only show notifications that have actual prizes (prizeCode exists and not empty)
+        Object.entries(notifications).forEach(([key, notif]) => {
+          const usernameMatch = notif.username?.trim().toLowerCase() === username?.trim().toLowerCase();
+          const qrNameMatch = notif.qrName?.trim().toLowerCase() === qrName?.trim().toLowerCase();
+          
+          // Check if this is an actual prize (has prizeCode and it's not empty)
+          const hasPrizeCode = notif.prizeCode && notif.prizeCode.trim() !== "";
+          
+          console.log(`Checking notification:`, {
+            key,
+            notifUsername: notif.username,
+            notifQrName: notif.qrName,
+            usernameMatch,
+            qrNameMatch,
+            claimed: notif.claimed,
+            hasPrizeCode,
+            prizeCode: notif.prizeCode
+          });
+
+          // Match username, qrName, AND must have a valid prize code
+          // Skip "Sorry, no prizes available" notifications
+          if (usernameMatch && qrNameMatch && hasPrizeCode) {
+            // Prioritize unclaimed, but if not found, use claimed ones
+            if (!foundReward || !notif.claimed) {
+              foundReward = notif;
+              notifKey = key;
+              console.log("✅ Found matching reward with prize code!", notif.claimed ? "(Already Claimed)" : "(Unclaimed)");
+            }
+          }
+        });
+
+        if (foundReward) {
+          setRewardPopup({
+            type: "success",
+            message: foundReward.message || "Congratulations! You won a reward!",
+            imgUrl: foundReward.imgUrl || "",
+            prizeCode: foundReward.prizeCode,
+            notificationKey: foundReward.claimed ? null : notifKey, // Don't update if already claimed
+            alreadyClaimed: foundReward.claimed || false
+          });
+        } else {
+          setRewardPopup({
+            type: "info",
+            message: `No reward found for ${qrName}. Keep scanning more QR codes!`
+          });
+        }
+      } else {
+        setRewardPopup({
+          type: "info",
+          message: "No reward notifications found. Keep scanning more QR codes!"
+        });
+      }
+    } catch (error) {
+      console.error("Error checking rewards:", error);
+      setRewardPopup({
+        type: "error",
+        message: "Error checking rewards. Please try again."
+      });
+    } finally {
+      setCheckingReward(false);
+    }
+  };
+
+  // Mark notification as claimed when closing reward popup (only if not already claimed)
+  const closeRewardPopup = async () => {
+    if (rewardPopup?.notificationKey && !rewardPopup?.alreadyClaimed) {
+      try {
+        const notifRef = dbRef(realtimeDb, `notifications/${rewardPopup.notificationKey}`);
+        await update(notifRef, { 
+          claimed: true, 
+          claimedAt: Date.now() 
+        });
+        console.log("Notification marked as claimed");
+      } catch (err) {
+        console.error("Error updating notification:", err);
+      }
+    }
+    setRewardPopup(null);
+  };
 
   // --- Relocate to user button ---
   const relocateToUser = () => {
@@ -263,6 +379,7 @@ export default function FastMapComponent({ qrList, scannedQRIds }) {
             el.innerHTML = "";
             el.onclick = () => {
               setSelectedQR({ ...qr, id });
+              setRewardPopup(null);
               map.setCenter([lng, lat]);
             };
           }
@@ -307,7 +424,7 @@ export default function FastMapComponent({ qrList, scannedQRIds }) {
           backgroundColor: "white",
         }}
       >
-        <img src="/images/map.png" style={{ width: "32px", height: "32px" }} />
+        <img src="/images/map.png" style={{ width: "32px", height: "32px" }} alt="Map" />
       </button>
 
       {/* Relocate to player */}
@@ -330,7 +447,7 @@ export default function FastMapComponent({ qrList, scannedQRIds }) {
           backgroundColor: "white",
         }}
       >
-        <img src="/images/playericon.png" style={{ width: "40px", height: "40px" }} />
+        <img src="/images/playericon.png" style={{ width: "40px", height: "40px" }} alt="Player" />
       </button>
 
       {/* QR popup */}
@@ -366,6 +483,31 @@ export default function FastMapComponent({ qrList, scannedQRIds }) {
             <p style={{ color: "black", margin: "0 0 24px", fontSize: "16px", lineHeight: "1.6" }}>
               {selectedQR.description || "No description available."}
             </p>
+
+            {/* Check Reward Button - Only for scanned QRs */}
+            {scannedQRIds.has(selectedQR.id) && (
+              <button
+                onClick={() => checkReward(selectedQR.name)}
+                disabled={checkingReward}
+                style={{
+                  width: "100%",
+                  padding: "14px",
+                  backgroundColor: checkingReward ? "#9ca3af" : "#eab308",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "12px",
+                  fontSize: "18px",
+                  fontWeight: "bold",
+                  marginBottom: "12px",
+                  cursor: checkingReward ? "not-allowed" : "pointer"
+                }}
+                onMouseEnter={e => !checkingReward && (e.currentTarget.style.backgroundColor = "#ca8a04")}
+                onMouseLeave={e => !checkingReward && (e.currentTarget.style.backgroundColor = "#eab308")}
+              >
+                {checkingReward ? "Checking..." : "🎁 Check Reward"}
+              </button>
+            )}
+
             <button
               onClick={() => setSelectedQR(null)}
               style={{ width: "100%", padding: "14px", backgroundColor: "#ef4444", color: "white", border: "none", borderRadius: "12px", fontSize: "18px", fontWeight: "bold" }}
@@ -373,6 +515,111 @@ export default function FastMapComponent({ qrList, scannedQRIds }) {
               onMouseLeave={e => e.currentTarget.style.backgroundColor = "#ef4444"}
             >
               Close
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Reward Result Popup - Same design as scanning page */}
+      {rewardPopup && (
+        <>
+          <div onClick={closeRewardPopup} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1001 }} />
+          <div style={{
+            position: "absolute",
+            top: "50%", 
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            background: "white",
+            borderRadius: "16px",
+            padding: "32px",
+            width: "90%",
+            maxWidth: "400px",
+            textAlign: "center",
+            boxShadow: "0 10px 40px rgba(0,0,0,0.4)",
+            zIndex: 1002,
+          }}>
+            {/* Icon/Image */}
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+              {rewardPopup.type === "success" && rewardPopup.imgUrl ? (
+                <img src={rewardPopup.imgUrl} alt="Reward" style={{ width: "128px", height: "128px", objectFit: "contain", borderRadius: "8px" }} />
+              ) : rewardPopup.type === "success" && rewardPopup.prizeCode ? (
+                <img src="/animation/gift.gif" alt="Reward" style={{ width: "160px", height: "160px", objectFit: "contain" }} />
+              ) : rewardPopup.type === "error" ? (
+                <img src="/animation/confuse.gif" alt="Error" style={{ width: "128px", height: "128px", objectFit: "contain" }} />
+              ) : (
+                <img src="/animation/confuse.gif" alt="Info" style={{ width: "128px", height: "128px", objectFit: "contain" }} />
+              )}
+            </div>
+
+            {/* Title */}
+            <h1 style={{ 
+              color: "#1f2937", 
+              margin: "0 0 8px", 
+              fontSize: "24px", 
+              fontWeight: "bold" 
+            }}>
+              {rewardPopup.type === "success" && rewardPopup.prizeCode ? "🎁 Reward Received!" : 
+               rewardPopup.type === "success" ? "🎉 Points Claimed!" :
+               rewardPopup.type === "error" ? "Error" : 
+               "🎉 Points Claimed!"}
+            </h1>
+
+            {/* Message */}
+            <p style={{ 
+              color: "#374151", 
+              margin: "8px 0 24px", 
+              fontSize: "18px", 
+              lineHeight: "1.6",
+              fontWeight: "600",
+              whiteSpace: "pre-line"
+            }}>
+              {rewardPopup.message}
+            </p>
+
+            {/* Prize Code - Only if available */}
+            {rewardPopup.prizeCode && (
+              <div style={{
+                padding: "16px",
+                backgroundColor: "#fef3c7",
+                border: "2px solid #f59e0b",
+                borderRadius: "8px",
+                marginTop: "16px",
+                marginBottom: "24px"
+              }}>
+                <p style={{ color: "#78716c", margin: "0 0 4px", fontSize: "14px", fontWeight: "500" }}>
+                  Your Prize Code:
+                </p>
+                <p style={{ 
+                  color: "#d97706", 
+                  margin: 0, 
+                  fontSize: "24px", 
+                  fontWeight: "bold",
+                  letterSpacing: "2px"
+                }}>
+                  {rewardPopup.prizeCode}
+                </p>
+              </div>
+            )}
+
+            {/* Close Button */}
+            <button
+              onClick={closeRewardPopup}
+              style={{ 
+                width: "100%", 
+                padding: "12px 40px", 
+                backgroundColor: "#16a34a",
+                color: "white", 
+                border: "none", 
+                borderRadius: "9999px", 
+                fontSize: "18px", 
+                fontWeight: "600",
+                cursor: "pointer",
+                transition: "background-color 0.2s"
+              }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = "#15803d"}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = "#16a34a"}
+            >
+              Continue
             </button>
           </div>
         </>
