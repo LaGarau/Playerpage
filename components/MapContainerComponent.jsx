@@ -474,9 +474,9 @@ export default function FastMapComponent({ qrList, scannedQRIds }) {
               <span className={scannedQRIds.has(selectedQR.id) ? "text-green-500" : "text-black"}>
                 Points: {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "(Scanned)"}
               </span>
-              <span className="text-black">
+              {/* <span className="text-black">
                 Reward: {selectedQR.reward || 0}
-              </span>
+              </span> */}
             </div>
 
             <hr style={{ borderTop: "1px solid #e5e7eb", margin: "16px 0" }} />
