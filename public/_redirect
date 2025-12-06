@@ -1,0 +1,13 @@
+# Allow real routes
+/login         /login          200
+/register      /register       200
+/map           /map            200
+/profile       /profile        200
+/leaderboard   /leaderboard    200
+
+# Make Next.js act like an SPA (THIS FIXES YOUR 404)
+# This ensures Netlify serves index.html instead of showing 404
+/*             /index.html     200
+
+# Catch-all redirect (runs AFTER index.html loads in SPA)
+# (Handled inside Next.js using middleware)
