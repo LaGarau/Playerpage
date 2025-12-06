@@ -96,36 +96,62 @@ export default function MapPage() {
     return () => unsubscribe();
   }, [qrList, currentUser]);
 
+  // Function to get external links for a QR by name (social media and review)
+  const getExternalLinksForQR = async (qrName) => {
+    try {
+      const qrDataRef = ref(realtimeDb, "QR-Data");
+      const snapshot = await get(qrDataRef);
+
+      if (!snapshot.exists()) {
+        return { socialMediaLink: null, reviewLink: null };
+      }
+
+      const data = snapshot.val();
+
+      for (const [key, qr] of Object.entries(data)) {
+        const qrNameClean = (qr.name || "").replace(/[,_]\d+$/, "").trim().toLowerCase();
+        const searchNameClean = qrName.trim().toLowerCase();
+
+        if (qrNameClean === searchNameClean) {
+          const socialMediaLink = qr.socialMediaLink?.trim() || null;
+          const reviewLink = qr.externalLink?.trim() || null;
+
+          return {
+            socialMediaLink: socialMediaLink && socialMediaLink !== "" ? socialMediaLink : null,
+            reviewLink: reviewLink && reviewLink !== "" ? reviewLink : null
+          };
+        }
+      }
+
+      return { socialMediaLink: null, reviewLink: null };
+    } catch (err) {
+      return { socialMediaLink: null, reviewLink: null };
+    }
+  };
+
   // Function to get an available prize code for the scanned QR
   const getAvailablePrizeCode = async (qrId, qrName) => {
     try {
-      console.log("Looking for prize code for QR:", qrName, "ID:", qrId);
-      
       const prizeCodesRef = ref(realtimeDb, "PrizeCodes");
       const snapshot = await get(prizeCodesRef);
-      
+
       if (!snapshot.exists()) {
-        console.log("No prize codes found in database");
         return null;
       }
 
       const data = snapshot.val();
-      
-      // Find an unused prize code for this QR (match by qrId or qrName)
+
       for (const [key, prize] of Object.entries(data)) {
         const qrNameMatch = prize.qrName?.trim().toLowerCase() === qrName?.trim().toLowerCase();
         const qrIdMatch = prize.qrId === qrId;
-        
+
         if ((qrNameMatch || qrIdMatch) && !prize.used) {
-          console.log("✅ Found available prize code:", prize.code);
           return { key, ...prize };
         }
       }
-      
-      console.log("No available prize codes for this QR");
+
       return null;
     } catch (err) {
-      console.error("Error getting prize code:", err);
       return null;
     }
   };
@@ -134,7 +160,7 @@ export default function MapPage() {
   const createPrizeNotification = async (username, qrName, prizeCode, prizeKey) => {
     try {
       const message = `🎉 ${username} scanned ${qrName} — Congratulations! Prize Code: ${prizeCode}`;
-      
+
       const notificationData = {
         username: username,
         qrName: qrName,
@@ -145,21 +171,17 @@ export default function MapPage() {
         createdAt: Date.now()
       };
 
-      // Create notification
       await push(ref(realtimeDb, "notifications"), notificationData);
-      
-      // Mark prize code as used
+
       const prizeRef = ref(realtimeDb, `PrizeCodes/${prizeKey}`);
-      await update(prizeRef, { 
-        used: true, 
+      await update(prizeRef, {
+        used: true,
         usedBy: username,
-        usedAt: Date.now() 
+        usedAt: Date.now()
       });
-      
-      console.log("✅ Prize notification created and code marked as used");
+
       return true;
     } catch (err) {
-      console.error("Error creating prize notification:", err);
       return false;
     }
   };
@@ -167,69 +189,44 @@ export default function MapPage() {
   // Function to check for notifications matching BOTH username AND qrName
   const checkForNotification = async (scannedQrName) => {
     const user = auth.currentUser;
-    
+
     if (!user) {
-      console.log("No current user");
       return null;
     }
 
     try {
-      // Get username from Firebase Users table
       const userProfileRef = ref(realtimeDb, `Users/${user.uid}`);
       const userProfileSnap = await get(userProfileRef);
-      const username = userProfileSnap.exists() 
-        ? userProfileSnap.val().username 
+      const username = userProfileSnap.exists()
+        ? userProfileSnap.val().username
         : user.displayName || "guest";
-
-      console.log("Checking notifications for:");
-      console.log("- Username:", username);
-      console.log("- QR Name:", scannedQrName);
 
       const notifRef = ref(realtimeDb, "notifications");
       const snapshot = await get(notifRef);
 
       if (!snapshot.exists()) {
-        console.log("No notifications found in database");
         return null;
       }
 
       const data = snapshot.val();
       let matchingNotifs = [];
 
-      // Find all matching unclaimed notifications for current user AND qrName
       Object.entries(data).forEach(([key, notif]) => {
-        // Match both username and qrName (case-insensitive)
         const usernameMatch = notif.username?.trim().toLowerCase() === username?.trim().toLowerCase();
         const qrNameMatch = notif.qrName?.trim().toLowerCase() === scannedQrName?.trim().toLowerCase();
-        
-        console.log(`Notification ${key}:`, {
-          notifUsername: notif.username,
-          notifQrName: notif.qrName,
-          usernameMatch,
-          qrNameMatch,
-          claimed: notif.claimed
-        });
 
         if (usernameMatch && qrNameMatch && !notif.claimed) {
-          console.log("✅ Match found! Notification:", notif.message);
           matchingNotifs.push({ ...notif, key });
         }
       });
 
       if (matchingNotifs.length > 0) {
-        // Sort by createdAt (newest first for most recent prizes)
         matchingNotifs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        
-        // Return the first (most recent) notification
-        const selectedNotif = matchingNotifs[0];
-        console.log("Selected notification:", selectedNotif);
-        return selectedNotif;
+        return matchingNotifs[0];
       }
 
-      console.log("No matching notification found");
       return null;
     } catch (err) {
-      console.error("Error checking notifications:", err);
       return null;
     }
   };
@@ -282,7 +279,6 @@ export default function MapPage() {
               return;
             }
 
-            // Fetch description
             const descSnap = await get(ref(realtimeDb, `QR-Data/${matched.id}/description`));
             setQrDescription(descSnap.exists() ? descSnap.val() : "No description available");
 
@@ -320,19 +316,19 @@ export default function MapPage() {
     try {
       const leaderboardRef = ref(realtimeDb, `playerleaderboards/${userId}`);
       const snapshot = await get(leaderboardRef);
-      
+
       if (snapshot.exists()) {
         const currentData = snapshot.val();
         const updatedPoints = (currentData.total_points || 0) + newPoints;
         const updatedScanCount = (currentData.scan_count || 0) + 1;
-        
+
         const firstScanTime = currentData.first_scan_time || Date.now();
         const currentTime = Date.now();
         const timeSpanMs = currentTime - firstScanTime;
         const hours = Math.floor(timeSpanMs / (1000 * 60 * 60));
         const minutes = Math.floor((timeSpanMs % (1000 * 60 * 60)) / (1000 * 60));
         const formattedTimeSpan = `${hours}h ${minutes}m`;
-        
+
         await set(leaderboardRef, {
           player_id: userId,
           player_name: username,
@@ -358,7 +354,7 @@ export default function MapPage() {
         });
       }
     } catch (error) {
-      console.error("Error updating leaderboard:", error);
+      // Silent error
     }
   };
 
@@ -375,33 +371,27 @@ export default function MapPage() {
     const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
     try {
-      // Save to scannedQRCodes (no prizeCode here)
-      await push(ref(realtimeDb, "scannedQRCodes"), { 
-        userId: user.uid, 
-        username, 
-        qrId: originalText, 
-        qrName, 
-        points, 
-        date, 
-        time 
+      await push(ref(realtimeDb, "scannedQRCodes"), {
+        userId: user.uid,
+        username,
+        qrId: originalText,
+        qrName,
+        points,
+        date,
+        time
       });
-      
+
       await push(ref(realtimeDb, "playerStatus"), { username, qrName });
       await updateUserProfile(user.uid, points);
       await updateLeaderboard(user.uid, username, points);
 
-      // Check if there's an available prize code for this QR
       const prizeCode = await getAvailablePrizeCode(qr.id, qrName);
-      
+
       if (prizeCode) {
-        console.log("🎁 Prize code available! Creating notification...");
         await createPrizeNotification(username, qrName, prizeCode.code, prizeCode.key);
-      } else {
-        console.log("No prize code available for this QR");
       }
-    } catch (err) { 
-      console.error("Error in saveScanned:", err);
-      alert("Failed to save scan. Please try again."); 
+    } catch (err) {
+      alert("Failed to save scan. Please try again.");
     }
   };
 
@@ -411,18 +401,18 @@ export default function MapPage() {
       const snapshot = await get(userRef);
       if (snapshot.exists()) {
         const userData = snapshot.val();
-        await set(userRef, { 
-          ...userData, 
-          totalPoints: (userData.totalPoints || 0) + pointsToAdd, 
-          qrScanned: (userData.qrScanned || 0) + 1, 
-          lastUpdated: new Date().toISOString() 
+        await set(userRef, {
+          ...userData,
+          totalPoints: (userData.totalPoints || 0) + pointsToAdd,
+          qrScanned: (userData.qrScanned || 0) + 1,
+          lastUpdated: new Date().toISOString()
         });
       } else {
-        await set(userRef, { 
-          totalPoints: pointsToAdd, 
-          qrScanned: 1, 
-          createdAt: new Date().toISOString(), 
-          lastUpdated: new Date().toISOString() 
+        await set(userRef, {
+          totalPoints: pointsToAdd,
+          qrScanned: 1,
+          createdAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString()
         });
       }
     } catch { }
@@ -433,36 +423,31 @@ export default function MapPage() {
   // Handle claim reward button click
   const handleClaimReward = async () => {
     const user = auth.currentUser;
-    
+
     if (!user) {
-      console.log("No current user for claim");
       return;
     }
 
-    console.log("=== CLAIM REWARD CLICKED ===");
-    console.log("User UID:", user.uid);
-    
     const qrPoints = scannedData?.points || 0;
     const scannedQrName = scannedData?.displayName || "";
 
-    // Close the scanned popup
     setScannedData(null);
 
-    // Check for notification matching BOTH username AND qrName
     const notification = await checkForNotification(scannedQrName);
-
-    console.log("Notification result:", notification);
+    const links = await getExternalLinksForQR(scannedQrName);
 
     if (notification) {
-      // Show notification popup with prize info
-      console.log("Showing notification popup with message:", notification.message);
-      setRewardNotif(notification);
+      setRewardNotif({
+        ...notification,
+        socialMediaLink: links.socialMediaLink,
+        reviewLink: links.reviewLink
+      });
     } else {
-      // Show default success message if no notification found
-      console.log("No notification found, showing default message");
       setRewardNotif({
         message: `You have successfully claimed ${qrPoints} ${qrPoints === 1 ? "point" : "points"}!`,
-        isDefault: true
+        isDefault: true,
+        socialMediaLink: links.socialMediaLink,
+        reviewLink: links.reviewLink
       });
     }
   };
@@ -470,13 +455,11 @@ export default function MapPage() {
   // Handle closing notification popup
   const handleCloseNotification = async () => {
     if (rewardNotif && !rewardNotif.isDefault) {
-      // Mark notification as claimed in Firebase
       try {
         const notifRef = ref(realtimeDb, `notifications/${rewardNotif.key}`);
         await update(notifRef, { claimed: true, claimedAt: Date.now() });
-        console.log("Notification marked as claimed");
       } catch (err) {
-        console.error("Error updating notification:", err);
+        // Silent error
       }
     }
     setRewardNotif(null);
@@ -492,12 +475,12 @@ export default function MapPage() {
         {/* QR Scanner Overlay */}
         {scanning && (
           <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black bg-opacity-90 p-4">
-            <div className="relative w-80 max-w-[350px] aspect-square border-4 border-green-500 rounded-lg overflow-hidden">
+            <div className="relative w-full max-w-[350px] aspect-square border-4 border-green-500 rounded-lg overflow-hidden">
               <div id="qr-scanner" className="absolute inset-0 w-full h-full" />
             </div>
             <button
               onClick={stopScanner}
-              className="mt-10 px-10 py-3 bg-red-500 text-white rounded-full hover:bg-red-600 transition"
+              className="mt-6 sm:mt-10 px-8 sm:px-10 py-2.5 sm:py-3 bg-red-500 text-white text-base sm:text-lg rounded-full hover:bg-red-600 transition"
             >
               Close Scanner
             </button>
@@ -507,25 +490,25 @@ export default function MapPage() {
         {/* Scanned Popup */}
         {scannedData && (
           <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-black bg-opacity-60">
-            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-              <div className="flex justify-center mb-4">
-                <img src="/animation/cheer.gif" alt="Congrats" className="w-32 h-32 sm:w-40 sm:h-40 object-contain" />
+            <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl">
+              <div className="flex justify-center mb-3 sm:mb-4">
+                <img src="/animation/cheer.gif" alt="Congrats" className="w-28 h-28 sm:w-40 sm:h-40 object-contain" />
               </div>
-              <h1 className="text-2xl font-bold text-gray-800 mb-2">{scannedData.displayName}</h1>
-              <p className="text-gray-600 text-lg">You have earned</p>
-              <p className="text-3xl font-bold text-green-600 mt-1">{scannedData.points} {scannedData.points === 1 ? 'point' : 'points'}</p>
-              <p className="text-gray-700 font-bold text-md mb-4">{qrDescription}</p>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">{scannedData.displayName}</h1>
+              <p className="text-gray-600 text-base sm:text-lg">You have earned</p>
+              <p className="text-2xl sm:text-3xl font-bold text-green-600 mt-1">{scannedData.points} {scannedData.points === 1 ? 'point' : 'points'}</p>
+              <p className="text-gray-700 font-bold text-sm sm:text-md mb-4 mt-2">{qrDescription}</p>
 
               <button
                 onClick={handleClaimReward}
-                className="mt-4 w-full px-10 py-3 bg-yellow-500 text-white font-semibold rounded-full hover:bg-yellow-600 transition"
+                className="mt-3 sm:mt-4 w-full px-6 sm:px-10 py-2.5 sm:py-3 bg-yellow-500 text-white text-base sm:text-lg font-semibold rounded-full hover:bg-yellow-600 transition"
               >
-               Check if you won
+                Check if you won
               </button>
 
               <button
                 onClick={closeScannedPopup}
-                className="bg-green-600 text-white px-10 py-3 rounded-full font-semibold hover:bg-green-700 transition w-full mt-2"
+                className="bg-green-600 text-white px-6 sm:px-10 py-2.5 sm:py-3 text-base sm:text-lg rounded-full font-semibold hover:bg-green-700 transition w-full mt-2"
               >
                 Continue
               </button>
@@ -536,32 +519,66 @@ export default function MapPage() {
         {/* Reward Notification Popup */}
         {rewardNotif && (
           <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-black bg-opacity-70">
-            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-              <div className="flex justify-center mb-4">
+            <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-center mb-3 sm:mb-4">
                 {rewardNotif.isDefault ? (
-                  <img src="/animation/confuse.gif" alt="Success" className="w-32 h-32 sm:w-40 sm:h-40 object-contain" />
+                  <img src="/animation/confuse.gif" alt="Success" className="w-28 h-28 sm:w-40 sm:h-40 object-contain" />
                 ) : rewardNotif.imgUrl ? (
-                  <img src={rewardNotif.imgUrl} alt="Reward" className="w-32 h-32 sm:w-40 sm:h-40 object-contain rounded-lg" />
+                  <img src={rewardNotif.imgUrl} alt="Reward" className="w-28 h-28 sm:w-40 sm:h-40 object-contain rounded-lg" />
                 ) : (
-                  <img src="/animation/cheer.gif" alt="Reward" className="w-32 h-32 sm:w-40 sm:h-40 object-contain" />
+                  <img src="/animation/cheer.gif" alt="Reward" className="w-28 h-28 sm:w-40 sm:h-40 object-contain" />
                 )}
               </div>
-              <h1 className="text-2xl font-bold text-gray-800 mb-2">
-                {rewardNotif.isDefault ? "🎉 Points Claimed!" : ""}
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">
+                {rewardNotif.isDefault ? "🎉 Points Claimed!" : "🎁 Congratulations!"}
               </h1>
-              <p className="text-gray-700 font-semibold text-lg mt-2 whitespace-pre-line">{rewardNotif.message}</p>
+              <p className="text-gray-700 font-semibold text-base sm:text-lg mt-2 whitespace-pre-line">{rewardNotif.message}</p>
 
               {/* Show Prize Code if available */}
               {!rewardNotif.isDefault && rewardNotif.prizeCode && (
-                <div className="mt-4 p-4 bg-yellow-50 border-2 border-yellow-400 rounded-lg">
-                  <p className="text-sm text-gray-600 mb-1">explore remaining qr code for grand prize</p>
-                  <p className="text-2xl font-bold text-yellow-600 tracking-wider">{rewardNotif.prizeCode}</p>
+                <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-yellow-50 border-2 border-yellow-400 rounded-lg">
+                  <p className="text-xs sm:text-sm text-gray-600 mb-1">Your Prize Code:</p>
+                  <p className="text-xl sm:text-2xl font-bold text-yellow-600 tracking-wider break-all">{rewardNotif.prizeCode}</p>
+                  <p className="text-xs text-gray-500 mt-2">Explore remaining QR codes for grand prize!</p>
+                </div>
+              )}
+
+              {/* External Links Section */}
+              {(rewardNotif.socialMediaLink || rewardNotif.reviewLink) && (
+                <div className="mt-3 sm:mt-4 space-y-2">
+                  {/* Social Media Link Button */}
+                  {rewardNotif.socialMediaLink && (
+                    <a
+                      href={rewardNotif.socialMediaLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full px-4 sm:px-6 py-2.5 sm:py-3 bg-blue-600 text-white text-sm sm:text-base font-semibold rounded-full hover:bg-blue-700 transition text-center"
+                    >
+                     SocialMedia Link
+                    </a>
+                  )}
+
+
+                  {/* Review Link Button */}
+                  {rewardNotif.reviewLink && (
+                    <a
+                      href={rewardNotif.reviewLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center w-full px-4 sm:px-6 py-2.5 sm:py-3 bg-amber-600 text-white text-sm sm:text-base font-semibold rounded-full hover:bg-amber-700 transition"
+                    >
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                      </svg>
+                      Give us a Review
+                    </a>
+                  )}
                 </div>
               )}
 
               <button
                 onClick={handleCloseNotification}
-                className="bg-green-600 text-white px-10 py-3 rounded-full font-semibold hover:bg-green-700 transition w-full mt-6"
+                className="bg-green-600 text-white px-6 sm:px-10 py-2.5 sm:py-3 text-base sm:text-lg rounded-full font-semibold hover:bg-green-700 transition w-full mt-3 sm:mt-4"
               >
                 Continue
               </button>
@@ -572,15 +589,15 @@ export default function MapPage() {
         {/* Already Scanned Popup */}
         {alreadyScannedData && (
           <div className="fixed inset-0 flex items-center justify-center z-50 p-4 bg-black bg-opacity-60">
-            <div className="bg-white rounded-2xl p-8 max-w-sm w-full text-center shadow-2xl">
-              <div className="flex justify-center mb-4">
-                <img src="/animation/confuse.gif" alt="Alert" className="w-24 h-24 object-contain" />
+            <div className="bg-white rounded-2xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl">
+              <div className="flex justify-center mb-3 sm:mb-4">
+                <img src="/animation/confuse.gif" alt="Alert" className="w-20 h-20 sm:w-24 sm:h-24 object-contain" />
               </div>
-              <h1 className="text-2xl font-bold text-gray-800 mb-2">Already Scanned</h1>
-              <p className="text-gray-600 text-lg">You have already scanned <strong>{alreadyScannedData.qrName}</strong>!</p>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-800 mb-2">Already Scanned</h1>
+              <p className="text-gray-600 text-base sm:text-lg">You have already scanned <strong>{alreadyScannedData.qrName}</strong>!</p>
               <button
                 onClick={() => setAlreadyScannedData(null)}
-                className="mt-6 w-full px-10 py-3 bg-red-600 text-white rounded-full font-semibold hover:bg-red-700 transition"
+                className="mt-4 sm:mt-6 w-full px-6 sm:px-10 py-2.5 sm:py-3 bg-red-600 text-white text-base sm:text-lg rounded-full font-semibold hover:bg-red-700 transition"
               >
                 Close
               </button>
@@ -590,17 +607,17 @@ export default function MapPage() {
 
         {/* Bottom Floating Bar */}
         {!scanning && !scannedData && (
-          <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[60%] max-w-md bg-white p-3 rounded-full shadow-lg z-50">
-            <Link href="/leaderboard" className="group p-3 rounded-full hover:bg-black transition">
-              <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
+          <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
+            <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
+              <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
                 <line x1="3" y1="6" x2="21" y2="6" />
                 <line x1="3" y1="12" x2="21" y2="12" />
                 <line x1="3" y1="18" x2="21" y2="18" />
               </svg>
             </Link>
 
-            <div onClick={startScanner} className="flex justify-center items-center w-16 h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
-              <svg width="32" height="32" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none">
+            <div onClick={startScanner} className="flex justify-center items-center w-14 h-14 sm:w-16 sm:h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
+              <svg width="28" height="28" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none" className="sm:w-8 sm:h-8">
                 <path d="M3 7V3H7" />
                 <path d="M17 3H21V7" />
                 <path d="M3 17V21H7" />
@@ -611,6 +628,7 @@ export default function MapPage() {
                 <rect x="14" y="13" width="2" height="2" rx="0.5" fill="white" />
               </svg>
             </div>
+
 
             <Link href="/profile" className="group p-3 rounded-full hover:bg-black transition">
               <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
