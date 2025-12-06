@@ -12,6 +12,7 @@ import SignInWithGoogle from "./SignInWithGoogle";
 export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false); // loading state
   const router = useRouter();
 
   // --- Guest Login ---
@@ -45,6 +46,10 @@ export default function LoginForm() {
   // --- Email/Password Login ---
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (loading) return; // Prevent duplicate submissions/clicks
+    setLoading(true);
+
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -54,7 +59,16 @@ export default function LoginForm() {
       router.push("/map");
     } catch (err: any) {
       console.error("Email Login Error:", err);
-      toast.error(err.message || "Login failed", { position: "top-center" });
+
+      // Use a toastId derived from Firebase error code (if available) to avoid duplicate toasts
+      const toastId = err?.code || "firebase-auth-error";
+
+      toast.error(err?.message || "Login failed", {
+        position: "top-center",
+        toastId,
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -71,6 +85,7 @@ export default function LoginForm() {
           onChange={(e) => setEmail(e.target.value)}
           className="w-full text-black px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           required
+          disabled={loading} // optional: disable while loading
         />
       </div>
 
@@ -85,12 +100,17 @@ export default function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
           className="w-full text-black px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           required
+          disabled={loading}
         />
       </div>
 
       {/* Login Button */}
-      <button type="submit" className="w-full bg-black text-white py-2 px-4 rounded-md mb-4">
-        Login
+      <button
+        type="submit"
+        className={`w-full bg-black text-white py-2 px-4 rounded-md mb-4 ${loading ? "opacity-70 cursor-wait" : ""}`}
+        disabled={loading}
+      >
+        {loading ? "Logging in..." : "Login"}
       </button>
 
       {/* <div className="text-center my-3">--Or--</div> */}
@@ -121,3 +141,4 @@ export default function LoginForm() {
     </form>
   );
 }
+
