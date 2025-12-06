@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { onValue, ref, push, set, get, update } from "firebase/database";
+import { onValue, ref, push, set, get, update, query, orderByChild, equalTo } from "firebase/database";
 import { auth, realtimeDb } from "../../lib/firebase";
 import AuthGuard from "../../components/authGuard";
 import LoaderTimer from "../../components/LoaderTimer";
@@ -96,8 +96,76 @@ export default function MapPage() {
     return () => unsubscribe();
   }, [qrList, currentUser]);
 
-  // Function to check for notifications
-  const checkForNotification = async () => {
+  // Function to get an available prize code for the scanned QR
+  const getAvailablePrizeCode = async (qrId, qrName) => {
+    try {
+      console.log("Looking for prize code for QR:", qrName, "ID:", qrId);
+      
+      const prizeCodesRef = ref(realtimeDb, "PrizeCodes");
+      const snapshot = await get(prizeCodesRef);
+      
+      if (!snapshot.exists()) {
+        console.log("No prize codes found in database");
+        return null;
+      }
+
+      const data = snapshot.val();
+      
+      // Find an unused prize code for this QR (match by qrId or qrName)
+      for (const [key, prize] of Object.entries(data)) {
+        const qrNameMatch = prize.qrName?.trim().toLowerCase() === qrName?.trim().toLowerCase();
+        const qrIdMatch = prize.qrId === qrId;
+        
+        if ((qrNameMatch || qrIdMatch) && !prize.used) {
+          console.log("✅ Found available prize code:", prize.code);
+          return { key, ...prize };
+        }
+      }
+      
+      console.log("No available prize codes for this QR");
+      return null;
+    } catch (err) {
+      console.error("Error getting prize code:", err);
+      return null;
+    }
+  };
+
+  // Function to create notification with prize code
+  const createPrizeNotification = async (username, qrName, prizeCode, prizeKey) => {
+    try {
+      const message = `🎉 ${username} scanned ${qrName} — Congratulations! Prize Code: ${prizeCode}`;
+      
+      const notificationData = {
+        username: username,
+        qrName: qrName,
+        message: message,
+        prizeCode: prizeCode,
+        imgUrl: "",
+        claimed: false,
+        createdAt: Date.now()
+      };
+
+      // Create notification
+      await push(ref(realtimeDb, "notifications"), notificationData);
+      
+      // Mark prize code as used
+      const prizeRef = ref(realtimeDb, `PrizeCodes/${prizeKey}`);
+      await update(prizeRef, { 
+        used: true, 
+        usedBy: username,
+        usedAt: Date.now() 
+      });
+      
+      console.log("✅ Prize notification created and code marked as used");
+      return true;
+    } catch (err) {
+      console.error("Error creating prize notification:", err);
+      return false;
+    }
+  };
+
+  // Function to check for notifications matching BOTH username AND qrName
+  const checkForNotification = async (scannedQrName) => {
     const user = auth.currentUser;
     
     if (!user) {
@@ -113,12 +181,12 @@ export default function MapPage() {
         ? userProfileSnap.val().username 
         : user.displayName || "guest";
 
-      console.log("Logged in username:", username);
+      console.log("Checking notifications for:");
+      console.log("- Username:", username);
+      console.log("- QR Name:", scannedQrName);
 
       const notifRef = ref(realtimeDb, "notifications");
       const snapshot = await get(notifRef);
-
-      console.log("Notifications exist:", snapshot.exists());
 
       if (!snapshot.exists()) {
         console.log("No notifications found in database");
@@ -126,48 +194,39 @@ export default function MapPage() {
       }
 
       const data = snapshot.val();
-      console.log("Notifications data:", data);
-
       let matchingNotifs = [];
 
-      // Find all matching unclaimed notifications for current user
+      // Find all matching unclaimed notifications for current user AND qrName
       Object.entries(data).forEach(([key, notif]) => {
-        console.log("Checking notification:", notif, "against username:", username);
+        // Match both username and qrName (case-insensitive)
+        const usernameMatch = notif.username?.trim().toLowerCase() === username?.trim().toLowerCase();
+        const qrNameMatch = notif.qrName?.trim().toLowerCase() === scannedQrName?.trim().toLowerCase();
         
-        // IMPORTANT: Only show notifications that don't have "scanned" in the message
-        // This filters out automatic scan notifications
-        if (notif.message?.toLowerCase().includes("scanned")) {
-          console.log("Skipping scan notification (contains 'scanned')");
-          return;
-        }
-        
-        // Also skip if type is "scan"
-        if (notif.type === "scan") {
-          console.log("Skipping scan notification (type: scan)");
-          return;
-        }
-        
-        if (
-          notif.username?.trim().toLowerCase() === 
-          username?.trim().toLowerCase() &&
-          !notif.claimed
-        ) {
+        console.log(`Notification ${key}:`, {
+          notifUsername: notif.username,
+          notifQrName: notif.qrName,
+          usernameMatch,
+          qrNameMatch,
+          claimed: notif.claimed
+        });
+
+        if (usernameMatch && qrNameMatch && !notif.claimed) {
           console.log("✅ Match found! Notification:", notif.message);
           matchingNotifs.push({ ...notif, key });
         }
       });
 
       if (matchingNotifs.length > 0) {
-        // Sort by createdAt (oldest first - admin messages are usually created first)
-        matchingNotifs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        // Sort by createdAt (newest first for most recent prizes)
+        matchingNotifs.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         
-        // Return the first (oldest) notification
+        // Return the first (most recent) notification
         const selectedNotif = matchingNotifs[0];
         console.log("Selected notification:", selectedNotif);
         return selectedNotif;
       }
 
-      console.log("No matching notification found for username:", username);
+      console.log("No matching notification found");
       return null;
     } catch (err) {
       console.error("Error checking notifications:", err);
@@ -236,7 +295,7 @@ export default function MapPage() {
             await saveScanned(matched, decodedText, qrName, points);
             setScanning(false);
 
-            setTimeout(() => setScannedData({ ...matched, displayName: qrName, points }), 100);
+            setTimeout(() => setScannedData({ ...matched, displayName: qrName, points, qrId: matched.id }), 100);
           } else if (!matched) {
             alert(`QR Code detected but not recognized: ${decodedText}`);
           }
@@ -257,6 +316,52 @@ export default function MapPage() {
     setScanning(false);
   };
 
+  const updateLeaderboard = async (userId, username, newPoints) => {
+    try {
+      const leaderboardRef = ref(realtimeDb, `playerleaderboards/${userId}`);
+      const snapshot = await get(leaderboardRef);
+      
+      if (snapshot.exists()) {
+        const currentData = snapshot.val();
+        const updatedPoints = (currentData.total_points || 0) + newPoints;
+        const updatedScanCount = (currentData.scan_count || 0) + 1;
+        
+        const firstScanTime = currentData.first_scan_time || Date.now();
+        const currentTime = Date.now();
+        const timeSpanMs = currentTime - firstScanTime;
+        const hours = Math.floor(timeSpanMs / (1000 * 60 * 60));
+        const minutes = Math.floor((timeSpanMs % (1000 * 60 * 60)) / (1000 * 60));
+        const formattedTimeSpan = `${hours}h ${minutes}m`;
+        
+        await set(leaderboardRef, {
+          player_id: userId,
+          player_name: username,
+          total_points: updatedPoints,
+          scan_count: updatedScanCount,
+          time_span: timeSpanMs,
+          formatted_time_span: formattedTimeSpan,
+          last_updated: Date.now(),
+          profile_image: currentData.profile_image || null
+        });
+      } else {
+        await set(leaderboardRef, {
+          player_id: userId,
+          player_name: username,
+          total_points: newPoints,
+          scan_count: 1,
+          time_span: 0,
+          formatted_time_span: "-",
+          first_scan_time: Date.now(),
+          last_updated: Date.now(),
+          profile_image: null,
+          rank: 0
+        });
+      }
+    } catch (error) {
+      console.error("Error updating leaderboard:", error);
+    }
+  };
+
   const saveScanned = async (qr, originalText, qrName, points) => {
     const user = auth.currentUser;
     if (!user) return;
@@ -270,10 +375,34 @@ export default function MapPage() {
     const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 
     try {
-      await push(ref(realtimeDb, "scannedQRCodes"), { userId: user.uid, username, qrId: originalText, qrName, points, date, time });
+      // Save to scannedQRCodes (no prizeCode here)
+      await push(ref(realtimeDb, "scannedQRCodes"), { 
+        userId: user.uid, 
+        username, 
+        qrId: originalText, 
+        qrName, 
+        points, 
+        date, 
+        time 
+      });
+      
       await push(ref(realtimeDb, "playerStatus"), { username, qrName });
       await updateUserProfile(user.uid, points);
-    } catch { alert("Failed to save scan. Please try again."); }
+      await updateLeaderboard(user.uid, username, points);
+
+      // Check if there's an available prize code for this QR
+      const prizeCode = await getAvailablePrizeCode(qr.id, qrName);
+      
+      if (prizeCode) {
+        console.log("🎁 Prize code available! Creating notification...");
+        await createPrizeNotification(username, qrName, prizeCode.code, prizeCode.key);
+      } else {
+        console.log("No prize code available for this QR");
+      }
+    } catch (err) { 
+      console.error("Error in saveScanned:", err);
+      alert("Failed to save scan. Please try again."); 
+    }
   };
 
   const updateUserProfile = async (userId, pointsToAdd) => {
@@ -282,9 +411,19 @@ export default function MapPage() {
       const snapshot = await get(userRef);
       if (snapshot.exists()) {
         const userData = snapshot.val();
-        await set(userRef, { ...userData, totalPoints: (userData.totalPoints || 0) + pointsToAdd, qrScanned: (userData.qrScanned || 0) + 1, lastUpdated: new Date().toISOString() });
+        await set(userRef, { 
+          ...userData, 
+          totalPoints: (userData.totalPoints || 0) + pointsToAdd, 
+          qrScanned: (userData.qrScanned || 0) + 1, 
+          lastUpdated: new Date().toISOString() 
+        });
       } else {
-        await set(userRef, { totalPoints: pointsToAdd, qrScanned: 1, createdAt: new Date().toISOString(), lastUpdated: new Date().toISOString() });
+        await set(userRef, { 
+          totalPoints: pointsToAdd, 
+          qrScanned: 1, 
+          createdAt: new Date().toISOString(), 
+          lastUpdated: new Date().toISOString() 
+        });
       }
     } catch { }
   };
@@ -304,17 +443,18 @@ export default function MapPage() {
     console.log("User UID:", user.uid);
     
     const qrPoints = scannedData?.points || 0;
+    const scannedQrName = scannedData?.displayName || "";
 
     // Close the scanned popup
     setScannedData(null);
 
-    // Check for notification
-    const notification = await checkForNotification();
+    // Check for notification matching BOTH username AND qrName
+    const notification = await checkForNotification(scannedQrName);
 
     console.log("Notification result:", notification);
 
     if (notification) {
-      // Show notification popup
+      // Show notification popup with prize info
       console.log("Showing notification popup with message:", notification.message);
       setRewardNotif(notification);
     } else {
@@ -403,13 +543,21 @@ export default function MapPage() {
                 ) : rewardNotif.imgUrl ? (
                   <img src={rewardNotif.imgUrl} alt="Reward" className="w-32 h-32 sm:w-40 sm:h-40 object-contain rounded-lg" />
                 ) : (
-                  <img src="/animation/gift.gif" alt="Reward" className="w-32 h-32 sm:w-40 sm:h-40 object-contain" />
+                  <img src="/animation/cheer.gif" alt="Reward" className="w-32 h-32 sm:w-40 sm:h-40 object-contain" />
                 )}
               </div>
               <h1 className="text-2xl font-bold text-gray-800 mb-2">
-                {rewardNotif.isDefault ? "🎉 Points Claimed!" : "🎁 Reward Received!"}
+                {rewardNotif.isDefault ? "🎉 Points Claimed!" : "🎁 Congratulations!"}
               </h1>
-              <p className="text-gray-700 font-semibold text-lg mt-2">{rewardNotif.message}</p>
+              <p className="text-gray-700 font-semibold text-lg mt-2 whitespace-pre-line">{rewardNotif.message}</p>
+
+              {/* Show Prize Code if available */}
+              {!rewardNotif.isDefault && rewardNotif.prizeCode && (
+                <div className="mt-4 p-4 bg-yellow-50 border-2 border-yellow-400 rounded-lg">
+                  <p className="text-sm text-gray-600 mb-1">Your Prize Code:</p>
+                  <p className="text-2xl font-bold text-yellow-600 tracking-wider">{rewardNotif.prizeCode}</p>
+                </div>
+              )}
 
               <button
                 onClick={handleCloseNotification}
