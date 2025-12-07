@@ -25,6 +25,7 @@ export default function MapPage() {
   const [alreadyScannedData, setAlreadyScannedData] = useState(null);
   const [rewardNotif, setRewardNotif] = useState(null);
   const scannerRef = useRef(null);
+  const [isMapReadyAndInZone, setIsMapReadyAndInZone] = useState(false);
 
   // Listen to auth changes
   useEffect(() => {
@@ -470,7 +471,11 @@ export default function MapPage() {
   return (
     <AuthGuard>
       <div className="relative h-screen w-full overflow-hidden">
-        <MapWithNoSSR qrList={qrList} scannedQRIds={scannedQRIds} />
+        <MapWithNoSSR
+          qrList={qrList}
+          scannedQRIds={scannedQRIds}
+          onMapReadyAndInZone={() => setIsMapReadyAndInZone(true)}  // Add this
+        />
 
         {/* QR Scanner Overlay */}
         {scanning && (
@@ -554,7 +559,7 @@ export default function MapPage() {
                       rel="noopener noreferrer"
                       className="w-full px-4 sm:px-6 py-2.5 sm:py-3 bg-blue-600 text-white text-sm sm:text-base font-semibold rounded-full hover:bg-blue-700 transition text-center"
                     >
-                     SocialMedia Link
+                      SocialMedia Link
                     </a>
                   )}
 
@@ -606,7 +611,7 @@ export default function MapPage() {
         )}
 
         {/* Bottom Floating Bar */}
-        {!scanning && !scannedData && (
+        {!scanning && !scannedData && isMapReadyAndInZone && (
           <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
             <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
               <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
