@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ref as dbRef, get, update, set } from "firebase/database";
+import { ref as dbRef, get, update, set } from "firebase/database"; // ← Added "set"
 import { realtimeDb, auth } from "../lib/firebase";
 
 const DEFAULT_MARKER = "/images/navPointLogo.png";
@@ -10,14 +10,11 @@ const MARKER_SIZE = 55;
 const BORDER_WIDTH = "3px";
 const HIGHLIGHT_COLOR = "#10B981";
 
+const PLAY_AREA_CENTER = { lat: 27.71386797377799, lng: 85.3101511297507 };
+const PLAY_AREA_RADIUS_METERS = 10000;
 
-// PLAY AREA
-const PLAY_AREA_CENTER = { lat: 27.71386797377799, lng: 85.3101511297507 };     //lat: 27.6550, lng: 85.3497  27.71386797377799,85.3101511297507
-const PLAY_AREA_RADIUS_METERS = 10000;                        
-
-// MAP BOUNDARY 
-const MAP_CENTER = { lat: 27.7172, lng: 85.324 };            
-const MAP_MAX_RADIUS_METERS = 10000;                        
+const MAP_CENTER = { lat: 27.7172, lng: 85.324 };
+const MAP_MAX_RADIUS_METERS = 10000;
 const CENTER = MAP_CENTER;
 const MAX_RADIUS = MAP_MAX_RADIUS_METERS;
 
@@ -38,13 +35,13 @@ const getDistance = (lat1, lng1, lat2, lng2) => {
   return R * c;
 };
 
-export default function FastMapComponent({ 
+export default function FastMapComponent({
   qrList,
   scannedQRIds,
   scanning = false,
   scannedData = null,
   startScanner
- }) {
+}) {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRefs = useRef({});
@@ -54,32 +51,13 @@ export default function FastMapComponent({
   const [selectedQR, setSelectedQR] = useState(null);
   const [checkingReward, setCheckingReward] = useState(false);
   const [rewardPopup, setRewardPopup] = useState(null);
-  const [isInsidePlayArea, setIsInsidePlayArea] = useState(null); 
+  const [isInsidePlayArea, setIsInsidePlayArea] = useState(null);
   const [locationChecked, setLocationChecked] = useState(false);
 
   const PLAYER_MARKER_SIZE = 50;
   const PLAYER_MARKER_ICON = "/images/playerlocation.png";
   const playerMarkerRef = useRef(null);
-
-  // --- Check if user is inside 2km play area ---
-  const checkPlayAreaProximity = (location) => {
-    const distance = getDistance(
-      PLAY_AREA_CENTER.lat,
-      PLAY_AREA_CENTER.lng,
-      location.lat,
-      location.lng
-    );
-
-    const inside = distance <= PLAY_AREA_RADIUS_METERS;
-    setIsInsidePlayArea(inside);
-    setLocationChecked(true);
-
-    if (!inside) {
-      console.log(`User is ${Math.round(distance / 1000)}km away from play area. Required: <= 2km`);
-    }
-  };
-
-  // --- Get user location and check play area ---
+  // Check location
   useEffect(() => {
     if (!navigator.geolocation) {
       setIsInsidePlayArea(false);
@@ -102,92 +80,91 @@ export default function FastMapComponent({
     );
   }, []);
 
-  // --- Check reward for SPECIFIC QR from Firebase notifications ---
-  const checkReward = async (qrName) => {
-    setCheckingReward(true);
-
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        setRewardPopup({ 
-          type: "error", 
-          message: "Please login to check rewards" 
-        });
-        setCheckingReward(false);
-        return;
-      }
-
-      const userProfileRef = dbRef(realtimeDb, `Users/${user.uid}`);
-      const userProfileSnap = await get(userProfileRef);
-      const username = userProfileSnap.exists() 
-        ? userProfileSnap.val().username 
-        : user.displayName || "guest";
-
-      console.log("Checking reward for:", { username, qrName });
-
-      const notifRef = dbRef(realtimeDb, "notifications");
-      const snapshot = await get(notifRef);
-
-      if (snapshot.exists()) {
-        const notifications = snapshot.val();
-        let foundReward = null;
-        let notifKey = null;
-
-        Object.entries(notifications).forEach(([key, notif]) => {
-          const usernameMatch = notif.username?.trim().toLowerCase() === username?.trim().toLowerCase();
-          const qrNameMatch = notif.qrName?.trim().toLowerCase() === qrName?.trim().toLowerCase();
-          const hasPrizeCode = notif.prizeCode && notif.prizeCode.trim() !== "";
-          
-          if (usernameMatch && qrNameMatch && hasPrizeCode) {
-            if (!foundReward || !notif.claimed) {
-              foundReward = notif;
-              notifKey = key;
-            }
-          }
-        });
-
-        if (foundReward) {
-          setRewardPopup({
-            type: "success",
-            message: foundReward.message || "Congratulations! You won a reward!",
-            imgUrl: foundReward.imgUrl || "",
-            prizeCode: foundReward.prizeCode,
-            notificationKey: foundReward.claimed ? null : notifKey,
-            alreadyClaimed: foundReward.claimed || false
-          });
-        } else {
-          setRewardPopup({
-            type: "info",
-            message: `No reward found for ${qrName}. Keep scanning more QR codes!`
-          });
-        }
-      } else {
-        setRewardPopup({
-          type: "info",
-          message: "No reward notifications found. Keep scanning more QR codes!"
-        });
-      }
-    } catch (error) {
-      console.error("Error checking rewards:", error);
-      setRewardPopup({
-        type: "error",
-        message: "Error checking rewards. Please try again."
+  
+  // RESTORED & MODIFIED: Check reward logic using ONLY the PrizeWon table
+ const checkReward = async (qrName) => {
+  setCheckingReward(true);
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      setRewardPopup({ 
+        type: "error", 
+        message: "Please login to check rewards" 
       });
-    } finally {
       setCheckingReward(false);
+      return;
     }
-  };
 
+    const userProfileRef = dbRef(realtimeDb, `Users/${user.uid}`);
+    const userProfileSnap = await get(userProfileRef);
+    const username = userProfileSnap.exists() 
+      ? userProfileSnap.val().username 
+      : user.displayName || "guest";
+    
+    console.log("Checking reward for:", { username, userId: user.uid });
+
+    // 🔥 Check PrizeWon table directly using userId
+    const prizeWonRef = dbRef(realtimeDb, `PrizeWon/${user.uid}`);
+    const prizeWonSnap = await get(prizeWonRef);
+
+    if (prizeWonSnap.exists()) {
+      const prizeData = prizeWonSnap.val();
+      
+      // User has won a prize!
+      setRewardPopup({
+        type: "success",
+        message: `🎉 Congratulations ${username}! You completed all 8 scans and won a prize!`,
+        imgUrl: prizeData.imgUrl || "",
+        prizeCode: prizeData.prizeCode,
+        wonAt: prizeData.wonAt,
+        scannedCodes: prizeData.scannedCodes || [],
+        alreadyClaimed: false
+      });
+      
+      console.log("Prize found:", prizeData.prizeCode);
+    } else {
+      // User hasn't won yet
+      // Check how many unique scans they have
+      const scansRef = dbRef(realtimeDb, "scannedQRCodes");
+      const scansSnap = await get(scansRef);
+      
+      let userScansCount = 0;
+      if (scansSnap.exists()) {
+        const allScans = scansSnap.val();
+        const userScans = Object.values(allScans).filter(s => s.userId === user.uid);
+        userScansCount = new Set(userScans.map(s => s.qrName)).size;
+      }
+
+      setRewardPopup({
+        type: "info",
+        message: `You have scanned ${userScansCount}/8 unique QR codes. Scan ${8 - userScansCount} more to win a prize!`
+      });
+      
+      console.log("No prize yet. User scans:", userScansCount);
+    }
+  } catch (error) {
+    console.error("Error checking rewards:", error);
+    setRewardPopup({
+      type: "error",
+      message: "Error checking rewards. Please try again."
+    });
+  } finally {
+    setCheckingReward(false);
+  }
+};
+
+
+
+  // Close popup and mark prize as claimed
   const closeRewardPopup = async () => {
-    if (rewardPopup?.notificationKey && !rewardPopup?.alreadyClaimed) {
+    if (rewardPopup?.prizeKey && !rewardPopup?.alreadyClaimed) {
       try {
-        const notifRef = dbRef(realtimeDb, `notifications/${rewardPopup.notificationKey}`);
-        await update(notifRef, { 
-          claimed: true, 
-          claimedAt: Date.now() 
+        await update(dbRef(realtimeDb, `PrizeWon/${rewardPopup.prizeKey}`), {
+          claimed: true,
+          claimedAt: Date.now()
         });
       } catch (err) {
-        console.error("Error updating notification:", err);
+        console.error("Failed to mark prize as claimed:", err);
       }
     }
     setRewardPopup(null);
@@ -251,7 +228,8 @@ export default function FastMapComponent({
     });
   };
 
-  // --- Save player coordinates to Firebase ---
+
+  // Save player location
   useEffect(() => {
     if (!userLocation) return;
 
@@ -270,7 +248,9 @@ export default function FastMapComponent({
           longitude: userLocation.lng,
           datetime: now.toLocaleString(),
         });
-      } catch { }
+      } catch (err) {
+        console.error("Failed to save location:", err);
+      }
     };
 
     savePlayerNav();
@@ -425,6 +405,9 @@ export default function FastMapComponent({
     );
   }
 
+
+
+  
   if (!isInsidePlayArea) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-800">
@@ -440,23 +423,21 @@ export default function FastMapComponent({
     );
   }
 
-  // --- NORMAL MAP RENDER (Only if inside 2km) ---
   return (
     <div ref={mapContainerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div id="galli-map" style={{ width: "100%", height: "100%" }} />
 
       {/* Buttons */}
-      <button onClick={goToLastQR} style={{ position: "absolute", bottom: "170px", right: "20px", zIndex: 1000, borderRadius: "50%", width: "50px", height: "50px", display: "flex", justifyContent: "center", alignItems: "center", boxShadow: "0 4px 10px rgba(0,0,0,0.3)", border: "none", cursor: "pointer", backgroundColor: "white" }}>
-        <img src="/images/map.png" style={{ width: "32px", height: "32px" }} alt="Map" />
+      <button onClick={goToLastQR} className="absolute bottom-44 right-5 z-[1000] w-12 h-12 rounded-full bg-white shadow-lg flex items-center justify-center">
+        <img src="/images/map.png" className="w-8 h-8" alt="Map" />
       </button>
 
-      <button onClick={relocateToUser} style={{ position: "absolute", bottom: "100px", right: "20px", zIndex: 1000, borderRadius: "50%", width: "50px", height: "50px", display: "flex", justifyContent: "center", alignItems: "center", boxShadow: "0 4px 10px rgba(0,0,0,0.3)", border: "none", cursor: "pointer", backgroundColor: "white" }}>
-        <img src="/images/playericon.png" style={{ width: "40px", height: "40px" }} alt="Player" />
+      <button onClick={relocateToUser} className="absolute bottom-28 right-5 z-[1000] w-12 h-12 rounded-full bg-white shadow-lg flex items-center justify-center">
+        <img src="/images/playericon.png" className="w-10 h-10" alt="Player" />
       </button>
 
-      {/* Bottom Floating Bar */}
-
-        {isInsidePlayArea && mapReady && !scanning && !scannedData && (
+      {/* Bottom Bar - Fixed closing tag */}
+      {isInsidePlayArea && mapReady && !scanning && !scannedData && (
           <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
             <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
               <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
@@ -489,71 +470,78 @@ export default function FastMapComponent({
           </div>
         )}
 
-      {/* QR Popup & Reward Popup - unchanged */}
+      {/* QR Popup */}
       {selectedQR && (
         <>
-          <div onClick={() => setSelectedQR(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 999 }} />
-          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: "white", borderRadius: "16px", padding: "24px", width: "90%", maxWidth: "400px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.4)", zIndex: 1000 }}>
-            {selectedQR.picture && <img src={selectedQR.picture} alt={selectedQR.name} style={{ width: "100%", height: "200px", objectFit: "cover", borderRadius: "12px", marginBottom: "16px" }} />}
-            <h2 style={{ color: "black", margin: "0 0 8px", fontSize: "28px", fontWeight: "bold" }}>{selectedQR.name}</h2>
-            <div className="flex justify-between mb-4 text-lg font-semibold">
-              <span className={scannedQRIds.has(selectedQR.id) ? "text-green-500" : "text-black"}>
-                Points: {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "(Scanned)"}
+          <div onClick={() => setSelectedQR(null)} className="fixed inset-0 bg-black/50 z-[999]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl p-8 w-11/12 max-w-md shadow-2xl z-[1000] max-h-[90vh] overflow-y-auto">
+            {selectedQR.picture && (
+              <img src={selectedQR.picture} alt={selectedQR.name} className="w-full h-56 object-cover rounded-2xl mb-6" />
+            )}
+            <h2 className="text-3xl font-bold text-center mb-4">{selectedQR.name}</h2>
+            <p className="text-xl text-center mb-6">
+              Points: <span className={scannedQRIds.has(selectedQR.id) ? "text-green-600 font-bold" : "text-gray-600"}>
+                {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "Scanned"}
               </span>
-            </div>
-            <hr style={{ borderTop: "1px solid #e5e7eb", margin: "16px 0" }} />
-            <p style={{ color: "black", margin: "0 0 24px", fontSize: "16px", lineHeight: "1.6" }}>
-              {selectedQR.description || "No description available."}
             </p>
 
             {scannedQRIds.has(selectedQR.id) && (
-              <button onClick={() => checkReward(selectedQR.name)} disabled={checkingReward}
-                style={{ width: "100%", padding: "14px", backgroundColor: checkingReward ? "#9ca3af" : "#eab308", color: "white", border: "none", borderRadius: "12px", fontSize: "18px", fontWeight: "bold", marginBottom: "12px", cursor: checkingReward ? "not-allowed" : "pointer" }}>
-                {checkingReward ? "Checking..." : "Check Reward"}
+              <button
+                onClick={() => checkReward(selectedQR.name)}
+                disabled={checkingReward}
+                className={`w-full py-4 rounded-2xl font-bold text-white text-lg transition ${checkingReward
+                    ? "bg-gray-400 cursor-not-allowed"
+                    : "bg-gradient-to-r from-orange-500 to-orange-500 hover:shadow-xl"
+                  }`}
+              >
+                {checkingReward ? "Checking..." : "Check Reward!"}
               </button>
             )}
 
-            <button onClick={() => setSelectedQR(null)}
-              style={{ width: "100%", padding: "14px", backgroundColor: "#ef4444", color: "white", border: "none", borderRadius: "12px", fontSize: "18px", fontWeight: "bold" }}>
+            <button
+              onClick={() => setSelectedQR(null)}
+              className="w-full mt-4 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-2xl transition"
+            >
               Close
             </button>
           </div>
         </>
       )}
 
+      {/* Reward Popup */}
       {rewardPopup && (
         <>
-          <div onClick={closeRewardPopup} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1001 }} />
-          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: "white", borderRadius: "16px", padding: "32px", width: "90%", maxWidth: "400px", textAlign: "center", boxShadow: "0 10px 40px rgba(0,0,0,0.4)", zIndex: 1002 }}>
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
-              {rewardPopup.type === "success" && rewardPopup.imgUrl ? (
-                <img src={rewardPopup.imgUrl} alt="Reward" style={{ width: "128px", height: "128px", objectFit: "contain", borderRadius: "8px" }} />
-              ) : rewardPopup.type === "success" && rewardPopup.prizeCode ? (
-                <img src="/animation/gift.gif" alt="Reward" style={{ width: "160px", height: "160px", objectFit: "contain" }} />
+          <div onClick={closeRewardPopup} className="fixed inset-0 bg-black/80 z-[1001]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl p-10 w-11/12 max-w-lg text-center shadow-2xl z-[1002]">
+            <div className="p-8">
+              {rewardPopup.type === "success" && rewardPopup.prizeCode ? (
+                <img src={rewardPopup.imgUrl || "/animation/gift.gif"} alt="Won" className="w-48 h-48 mx-auto mb-6" />
               ) : (
-                <img src="/animation/confuse.gif" alt="Info" style={{ width: "128px", height: "128px", objectFit: "contain" }} />
+                <img src="/animation/confuse.gif" alt="No prize" className="w-32 h-32 mx-auto mb-6" />
               )}
+
+              <h1 className="text-4xl font-bold mb-4">
+                {rewardPopup.type === "success" ? "You Won!" : "No Prize Yet"}
+              </h1>
+
+              <p className="text-xl text-gray-700 mb-8">{rewardPopup.message}</p>
+
+              {rewardPopup.prizeCode && (
+                <div className="bg-gradient-to-r from-amber-100 to-orange-100 border-4 border-amber-400 rounded-3xl p-6 mb-8">
+                  <p className="text-amber-800 font-bold mb-3">Your Prize Code:</p>
+                  <p className="text-5xl font-black text-amber-600 tracking-widest">
+                    {rewardPopup.prizeCode}
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={closeRewardPopup}
+                className="w-full py-5 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-2xl font-bold rounded-3xl shadow-xl hover:shadow-2xl transition"
+              >
+                Continue
+              </button>
             </div>
-            <h1 style={{ color: "#1f2937", margin: "0 0 8px", fontSize: "24px", fontWeight: "bold" }}>
-              {rewardPopup.type === "success" && rewardPopup.prizeCode ? "Reward Received!" : 
-               rewardPopup.type === "success" ? "Points Claimed!" :
-               "Error"}
-            </h1>
-            <p style={{ color: "#374151", margin: "8px 0 24px", fontSize: "18px", lineHeight: "1.6", fontWeight: "600" }}>
-              {rewardPopup.message}
-            </p>
-            {rewardPopup.prizeCode && (
-              <div style={{ padding: "16px", backgroundColor: "#fef3c7", border: "2px solid #f59e0b", borderRadius: "8px", margin: "16px 0" }}>
-                <p style={{ color: "#78716c", margin: "0 0 4px" }}>Your Prize Code:</p>
-                <p style={{ color: "#d97706", margin: 0, fontSize: "24px", fontWeight: "bold", letterSpacing: "2px" }}>
-                  {rewardPopup.prizeCode}
-                </p>
-              </div>
-            )}
-            <button onClick={closeRewardPopup}
-              style={{ width: "100%", padding: "12px 40px", backgroundColor: "#16a34a", color: "white", border: "none", borderRadius: "9999px", fontSize: "18px", fontWeight: "600", cursor: "pointer" }}>
-              Continue
-            </button>
           </div>
         </>
       )}
