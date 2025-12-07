@@ -183,52 +183,6 @@ export default function MapPage() {
     setScanning(false);
   };
 
-  const updateLeaderboard = async (userId, username, newPoints) => {
-    try {
-      const leaderboardRef = ref(realtimeDb, `playerleaderboards/${userId}`);
-      const snapshot = await get(leaderboardRef);
-      
-      if (snapshot.exists()) {
-        const currentData = snapshot.val();
-        const updatedPoints = (currentData.total_points || 0) + newPoints;
-        const updatedScanCount = (currentData.scan_count || 0) + 1;
-        
-        const firstScanTime = currentData.first_scan_time || Date.now();
-        const currentTime = Date.now();
-        const timeSpanMs = currentTime - firstScanTime;
-        const hours = Math.floor(timeSpanMs / (1000 * 60 * 60));
-        const minutes = Math.floor((timeSpanMs % (1000 * 60 * 60)) / (1000 * 60));
-        const formattedTimeSpan = `${hours}h ${minutes}m`;
-        
-        await set(leaderboardRef, {
-          player_id: userId,
-          player_name: username,
-          total_points: updatedPoints,
-          scan_count: updatedScanCount,
-          time_span: timeSpanMs,
-          formatted_time_span: formattedTimeSpan,
-          last_updated: Date.now(),
-          profile_image: currentData.profile_image || null
-        });
-      } else {
-        await set(leaderboardRef, {
-          player_id: userId,
-          player_name: username,
-          total_points: newPoints,
-          scan_count: 1,
-          time_span: 0,
-          formatted_time_span: "-",
-          first_scan_time: Date.now(),
-          last_updated: Date.now(),
-          profile_image: null,
-          rank: 0
-        });
-      }
-    } catch (error) {
-      console.error("Error updating leaderboard:", error);
-    }
-  };
-
   const saveScanned = async (qr, originalText, qrName, points) => {
     const user = auth.currentUser;
     if (!user) return;
@@ -245,7 +199,6 @@ export default function MapPage() {
       await push(ref(realtimeDb, "scannedQRCodes"), { userId: user.uid, username, qrId: originalText, qrName, points, date, time });
       await push(ref(realtimeDb, "playerStatus"), { username, qrName });
       await updateUserProfile(user.uid, points);
-      await updateLeaderboard(user.uid, username, points);
     } catch { alert("Failed to save scan. Please try again."); }
   };
 
