@@ -25,7 +25,6 @@ export default function MapPage() {
   const [alreadyScannedData, setAlreadyScannedData] = useState(null);
   const [rewardNotif, setRewardNotif] = useState(null);
   const scannerRef = useRef(null);
-  const [isMapReadyAndInZone, setIsMapReadyAndInZone] = useState(false);
 
   // Listen to auth changes
   useEffect(() => {
@@ -471,12 +470,14 @@ export default function MapPage() {
   return (
     <AuthGuard>
       <div className="relative h-screen w-full overflow-hidden">
+        {/* PASS ALL REQUIRED PROPS HERE */}
         <MapWithNoSSR
           qrList={qrList}
           scannedQRIds={scannedQRIds}
-          onMapReadyAndInZone={() => setIsMapReadyAndInZone(true)}  // Add this
+          scanning={scanning}
+          scannedData={scannedData}
+          startScanner={startScanner}
         />
-
         {/* QR Scanner Overlay */}
         {scanning && (
           <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black bg-opacity-90 p-4">
@@ -610,39 +611,7 @@ export default function MapPage() {
           </div>
         )}
 
-        {/* Bottom Floating Bar */}
-        {!scanning && !scannedData && isMapReadyAndInZone && (
-          <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
-            <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
-              <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
-            </Link>
-
-            <div onClick={startScanner} className="flex justify-center items-center w-14 h-14 sm:w-16 sm:h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
-              <svg width="28" height="28" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none" className="sm:w-8 sm:h-8">
-                <path d="M3 7V3H7" />
-                <path d="M17 3H21V7" />
-                <path d="M3 17V21H7" />
-                <path d="M17 21H21V17" />
-                <rect x="8" y="8.5" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="14" y="8.5" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="8" y="13" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="14" y="13" width="2" height="2" rx="0.5" fill="white" />
-              </svg>
-            </div>
-
-
-            <Link href="/profile" className="group p-3 rounded-full hover:bg-black transition">
-              <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
-                <path d="M3 10L12 3L21 10" />
-                <path d="M5 10V21H19V10" />
-              </svg>
-            </Link>
-          </div>
-        )}
+        
 
       </div>
     </AuthGuard>
