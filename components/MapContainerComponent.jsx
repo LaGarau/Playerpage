@@ -12,7 +12,7 @@ const MAX_RADIUS = 10000;
 const PROXIMITY_THRESHOLD = 50;
 
 // Thamel area check 
-const THAMEL_CENTER = { lat: 27.7172, lng: 85.324 }; 
+const THAMEL_CENTER = { lat: 27.6963538719388, lng: 85.2978647469178 }; 
 const THAMEL_ACCESS_RADIUS = 2000; 
 
 const getBorderColor = (type) => {
