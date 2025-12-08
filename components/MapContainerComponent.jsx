@@ -9,9 +9,9 @@ const MARKER_SIZE = 55;
 const BORDER_WIDTH = "3px";
 const HIGHLIGHT_COLOR = "#10B981";
 
-const getBorderColor = (type: string) => {
+const getBorderColor = (type) => {
   if (!type) return "black";
-  const map: Record<string, string> = {
+  const map = {
     demo: "red",
     event: "red",
     sponsor: "blue",
