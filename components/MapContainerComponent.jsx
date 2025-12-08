@@ -534,6 +534,10 @@ return (
             Points: <span className={scannedQRIds.has(selectedQR.id) ? "text-green-600 font-bold" : "text-gray-600"}>
               {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "Scanned"}
             </span>
+            {selectedQR.description && (
+                <p className="text-center text-gray-600 text-sm sm:text-base mb-2">{selectedQR.description}</p>
+            )}
+
           </p>
           {scannedQRIds.has(selectedQR.id) && (
             <button
