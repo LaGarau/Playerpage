@@ -10,11 +10,13 @@ const MARKER_SIZE = 55;
 const BORDER_WIDTH = "3px";
 const HIGHLIGHT_COLOR = "#10B981";
 
-const PLAY_AREA_CENTER = { lat: 27.71386797377799, lng: 85.3101511297507 };
-const PLAY_AREA_RADIUS_METERS = 10000;
+// PLAY AREA
+const PLAY_AREA_CENTER = { lat: 27.71386797377799, lng: 85.3101511297507 };     
+const PLAY_AREA_RADIUS_METERS = 10000;                        
 
-const MAP_CENTER = { lat: 27.7172, lng: 85.324 };
-const MAP_MAX_RADIUS_METERS = 10000;
+// MAP BOUNDARY 
+const MAP_CENTER = { lat: 27.7172, lng: 85.324 };            
+const MAP_MAX_RADIUS_METERS = 10000;                        
 const CENTER = MAP_CENTER;
 const MAX_RADIUS = MAP_MAX_RADIUS_METERS;
 
@@ -35,13 +37,13 @@ const getDistance = (lat1, lng1, lat2, lng2) => {
   return R * c;
 };
 
-export default function FastMapComponent({
+export default function FastMapComponent({ 
   qrList,
   scannedQRIds,
   scanning = false,
   scannedData = null,
   startScanner
-}) {
+ }) {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRefs = useRef({});
@@ -51,76 +53,36 @@ export default function FastMapComponent({
   const [selectedQR, setSelectedQR] = useState(null);
   const [checkingReward, setCheckingReward] = useState(false);
   const [rewardPopup, setRewardPopup] = useState(null);
-  
-  // RESTORED STATES
-  const [isInsidePlayArea, setIsInsidePlayArea] = useState(true); // <-- Set to TRUE by default to skip check
-  const [locationChecked, setLocationChecked] = useState(true); // <-- Set to TRUE by default to skip check
-  
-  const [rulesAccepted, setRulesAccepted] = useState(false);
-  const [checkingRulesStatus, setCheckingRulesStatus] = useState(true);
-  
-  // RESTORED STATE
-  const [showTooFarPopup, setShowTooFarPopup] = useState(false); 
+  const [isInsidePlayArea, setIsInsidePlayArea] = useState(null); 
+  const [locationChecked, setLocationChecked] = useState(false);
 
   const PLAYER_MARKER_SIZE = 50;
   const PLAYER_MARKER_ICON = "/images/playerlocation.png";
   const playerMarkerRef = useRef(null);
 
-  // Check if user has already accepted rules
-  useEffect(() => {
-    const checkRulesAcceptance = async () => {
-      try {
-        const user = auth.currentUser;
-        if (!user) {
-          setRulesAccepted(false);
-          setCheckingRulesStatus(false);
-          return;
-        }
+  // --- Check if user is inside 2km play area ---
+  const checkPlayAreaProximity = (location) => {
+    const distance = getDistance(
+      PLAY_AREA_CENTER.lat,
+      PLAY_AREA_CENTER.lng,
+      location.lat,
+      location.lng
+    );
 
-        const rulesRef = dbRef(realtimeDb, `Users/${user.uid}/rulesAccepted`);
-        const rulesSnap = await get(rulesRef);
-        
-        if (rulesSnap.exists() && rulesSnap.val() === true) {
-          setRulesAccepted(true);
-        } else {
-          setRulesAccepted(false);
-        }
-      } catch (err) {
-        console.error("Failed to check rules status:", err);
-        setRulesAccepted(false);
-      } finally {
-        setCheckingRulesStatus(false);
-      }
-    };
+    const inside = distance <= PLAY_AREA_RADIUS_METERS;
+    setIsInsidePlayArea(inside);
+    setLocationChecked(true);
 
-    checkRulesAcceptance();
-  }, []);
-
-  // Accept rules and save to database
-  const acceptRules = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        alert("Please login first");
-        return;
-      }
-
-      await set(dbRef(realtimeDb, `Users/${user.uid}/rulesAccepted`), true);
-      setRulesAccepted(true);
-    } catch (err) {
-      console.error("Failed to save rules acceptance:", err);
-      alert("Error saving acceptance. Please try again.");
+    if (!inside) {
+      console.log(`User is ${Math.round(distance / 1000)}km away from play area. Required: <= 2km`);
     }
   };
 
-  // Check location - **LOCATION CHECKING LOGIC COMMENTED OUT**
+  // --- Get user location and check play area ---
   useEffect(() => {
-    if (!rulesAccepted || checkingRulesStatus) return;
-    
     if (!navigator.geolocation) {
-      // setIsInsidePlayArea(false); // Original logic
-      // setLocationChecked(true); // Original logic
-      // setTimeout(() => setShowTooFarPopup(true), 3000); // Original logic
+      setIsInsidePlayArea(false);
+      setLocationChecked(true);
       return;
     }
 
@@ -128,32 +90,21 @@ export default function FastMapComponent({
       (pos) => {
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setUserLocation(loc);
-        
-        // const dist = getDistance(PLAY_AREA_CENTER.lat, PLAY_AREA_CENTER.lng, loc.lat, loc.lng); // Original logic
-        // const inside = dist <= PLAY_AREA_RADIUS_METERS; // Original logic
-        
-        // setIsInsidePlayArea(inside); // Original logic
-        // setLocationChecked(true); // Original logic
-        
-        // if (!inside) { // Original logic
-        //   setTimeout(() => setShowTooFarPopup(true), 3000); // Original logic
-        // } // Original logic
+        const dist = getDistance(PLAY_AREA_CENTER.lat, PLAY_AREA_CENTER.lng, loc.lat, loc.lng);
+        setIsInsidePlayArea(dist <= PLAY_AREA_RADIUS_METERS);
+        setLocationChecked(true);
       },
       () => {
-        // setIsInsidePlayArea(false); // Original logic
-        // setLocationChecked(true); // Original logic
-        // setTimeout(() => setShowTooFarPopup(true), 3000); // Original logic
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
+        setIsInsidePlayArea(false);
+        setLocationChecked(true);
       }
     );
-  }, [rulesAccepted, checkingRulesStatus]);
+  }, []);
 
+  // --- Check reward for SPECIFIC QR from Firebase notifications ---
   const checkReward = async (qrName) => {
     setCheckingReward(true);
+
     try {
       const user = auth.currentUser;
       if (!user) {
@@ -171,35 +122,48 @@ export default function FastMapComponent({
         ? userProfileSnap.val().username 
         : user.displayName || "guest";
 
-      const prizeWonRef = dbRef(realtimeDb, `PrizeWon/${user.uid}`);
-      const prizeWonSnap = await get(prizeWonRef);
+      console.log("Checking reward for:", { username, qrName });
 
-      if (prizeWonSnap.exists()) {
-        const prizeData = prizeWonSnap.val();
-        
-        setRewardPopup({
-          type: "success",
-          message: `🎉 Congratulations ${username}! You completed all 8 scans and won a prize!`,
-          imgUrl: prizeData.imgUrl || "",
-          prizeCode: prizeData.prizeCode,
-          wonAt: prizeData.wonAt,
-          scannedCodes: prizeData.scannedCodes || [],
-          alreadyClaimed: false
+      const notifRef = dbRef(realtimeDb, "notifications");
+      const snapshot = await get(notifRef);
+
+      if (snapshot.exists()) {
+        const notifications = snapshot.val();
+        let foundReward = null;
+        let notifKey = null;
+
+        Object.entries(notifications).forEach(([key, notif]) => {
+          const usernameMatch = notif.username?.trim().toLowerCase() === username?.trim().toLowerCase();
+          const qrNameMatch = notif.qrName?.trim().toLowerCase() === qrName?.trim().toLowerCase();
+          const hasPrizeCode = notif.prizeCode && notif.prizeCode.trim() !== "";
+          
+          if (usernameMatch && qrNameMatch && hasPrizeCode) {
+            if (!foundReward || !notif.claimed) {
+              foundReward = notif;
+              notifKey = key;
+            }
+          }
         });
-      } else {
-        const scansRef = dbRef(realtimeDb, "scannedQRCodes");
-        const scansSnap = await get(scansRef);
-        
-        let userScansCount = 0;
-        if (scansSnap.exists()) {
-          const allScans = scansSnap.val();
-          const userScans = Object.values(allScans).filter(s => s.userId === user.uid);
-          userScansCount = new Set(userScans.map(s => s.qrName)).size;
-        }
 
+        if (foundReward) {
+          setRewardPopup({
+            type: "success",
+            message: foundReward.message || "Congratulations! You won a reward!",
+            imgUrl: foundReward.imgUrl || "",
+            prizeCode: foundReward.prizeCode,
+            notificationKey: foundReward.claimed ? null : notifKey,
+            alreadyClaimed: foundReward.claimed || false
+          });
+        } else {
+          setRewardPopup({
+            type: "info",
+            message: `No reward found for ${qrName}. Keep scanning more QR codes!`
+          });
+        }
+      } else {
         setRewardPopup({
           type: "info",
-          message: `You have scanned ${userScansCount}/8 unique QR codes. Scan ${8 - userScansCount} more to win a prize!`
+          message: "No reward notifications found. Keep scanning more QR codes!"
         });
       }
     } catch (error) {
@@ -214,14 +178,15 @@ export default function FastMapComponent({
   };
 
   const closeRewardPopup = async () => {
-    if (rewardPopup?.prizeKey && !rewardPopup?.alreadyClaimed) {
+    if (rewardPopup?.notificationKey && !rewardPopup?.alreadyClaimed) {
       try {
-        await update(dbRef(realtimeDb, `PrizeWon/${rewardPopup.prizeKey}`), {
-          claimed: true,
-          claimedAt: Date.now()
+        const notifRef = dbRef(realtimeDb, `notifications/${rewardPopup.notificationKey}`);
+        await update(notifRef, { 
+          claimed: true, 
+          claimedAt: Date.now() 
         });
       } catch (err) {
-        console.error("Failed to mark prize as claimed:", err);
+        console.error("Error updating notification:", err);
       }
     }
     setRewardPopup(null);
@@ -237,9 +202,9 @@ export default function FastMapComponent({
     });
   };
 
+  // --- Update player marker ---
   useEffect(() => {
-    // Restored isInsidePlayArea check for marker update, but default state is true
-    if (!mapReady || !mapInstanceRef.current || !userLocation || !isInsidePlayArea) return; 
+    if (!mapReady || !mapInstanceRef.current || !userLocation) return;
 
     const mapPlugin = mapInstanceRef.current;
 
@@ -264,8 +229,9 @@ export default function FastMapComponent({
     }
 
     mapPlugin.map.setCenter([userLocation.lng, userLocation.lat]);
-  }, [mapReady, userLocation, isInsidePlayArea]); // Restored isInsidePlayArea dependency
+  }, [mapReady, userLocation]);
 
+  // --- Go to last QR button ---
   const goToLastQR = () => {
     if (!mapInstanceRef.current || !qrList?.length) return;
 
@@ -284,6 +250,7 @@ export default function FastMapComponent({
     });
   };
 
+  // --- Save player coordinates to Firebase ---
   useEffect(() => {
     if (!userLocation) return;
 
@@ -302,9 +269,7 @@ export default function FastMapComponent({
           longitude: userLocation.lng,
           datetime: now.toLocaleString(),
         });
-      } catch (err) {
-        console.error("Failed to save location:", err);
-      }
+      } catch { }
     };
 
     savePlayerNav();
@@ -312,9 +277,9 @@ export default function FastMapComponent({
     return () => clearInterval(intervalId);
   }, [userLocation]);
 
+  // --- Initialize map ONLY if inside play area ---
   useEffect(() => {
-    // Restored isInsidePlayArea check for map initialization, but default state is true
-    if (!userLocation || mapInstanceRef.current || !isInsidePlayArea) return; 
+    if (!userLocation || mapInstanceRef.current || !isInsidePlayArea) return;
 
     const initMap = async () => {
       if (!window.GalliMapPlugin) {
@@ -382,8 +347,9 @@ export default function FastMapComponent({
       mapInstanceRef.current?.map?.remove();
       mapInstanceRef.current = null;
     };
-  }, [userLocation, isInsidePlayArea]); // Restored isInsidePlayArea dependency
+  }, [userLocation, isInsidePlayArea]);
 
+  // --- QR markers ---
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
     const map = mapInstanceRef.current.map;
@@ -446,86 +412,96 @@ export default function FastMapComponent({
     });
   }, [qrList, scannedQRIds, mapReady]);
 
-  // RENDER: Loading state (checking rules status)
-  if (checkingRulesStatus) {
+  // --- RENDER: Show popup if far, otherwise show map ---
+  if (!locationChecked || isInsidePlayArea === null) {
     return (
       <div style={{ width: "100%", height: "100vh", background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "24px", marginBottom: "16px" }}>Loading...</div>
+          <div style={{ fontSize: "24px", marginBottom: "16px" }}>Checking your location...</div>
           <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-yellow-500 mx-auto"></div>
         </div>
       </div>
     );
   }
 
-  // RENDER: Rules screen FIRST (before location check)
-  if (!rulesAccepted) {
+  if (!isInsidePlayArea) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 p-4">
-        <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-black text-gray-900 mb-2">Before You Play</h1>
-            <p className="text-xl text-gray-600 font-semibold">Quick Rules</p>
-          </div>
-
-          <div className="space-y-4 mb-8">
-            {[
-              "One account per player.",
-              "Scan all available QR codes to earn one prize (while supplies last).",
-              "Don't take or share photos of QR codes.",
-              "Don't damage, tamper with, or remove QR codes.",
-              "Respect each participating location — follow their rules and staff instructions.",
-              "No cheating, automation, or exploits.",
-              "Prizes are first-come, first-served.",
-              "Be considerate of other players and don't block QR codes.",
-              "Stay safe and avoid restricted areas.",
-              "Supporting our partner establishments with a Google Review or social post is greatly appreciated!"
-            ].map((rule, idx) => (
-              <div key={idx} className="flex items-start gap-4 bg-gray-50 p-4 rounded-xl hover:bg-gray-100 transition">
-                <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
-                  {idx + 1}
-                </div>
-                <p className="text-gray-800 text-lg leading-relaxed">{rule}</p>
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={acceptRules}
-            className="w-full py-5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white text-2xl font-bold rounded-2xl shadow-xl hover:shadow-2xl transition transform hover:scale-105"
-          >
-            I Accept — Let's Play! 🎮
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", backgroundColor: "#374151" }}>
+        <div style={{ backgroundColor: "white", padding: "40px", borderRadius: "16px", textAlign: "center", maxWidth: "448px" }}>
+          <img src="/animation/confuse.gif" alt="Too far" style={{ width: "128px", margin: "0 auto 24px" }} />
+          <h1 style={{ fontSize: "2rem", fontWeight: "bold", color: "#dc2626", marginBottom: "16px" }}>You're Too Far!</h1>
+          <p style={{ fontSize: "1.125rem", marginBottom: "24px", color: "black" }}>Come within 2km of Thamel to play</p>
+          <button onClick={() => window.location.reload()} style={{ backgroundColor: "black", color: "white", padding: "12px 32px", borderRadius: "9999px", fontSize: "1.125rem", fontWeight: "bold", border: "none", cursor: "pointer" }}>
+            Try Again
           </button>
         </div>
       </div>
     );
   }
 
-  // RENDER: Main map view (Original Logic restored, but default state is true)
+  // --- NORMAL MAP RENDER (Only if inside 2km) ---
   return (
     <div ref={mapContainerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div id="galli-map" style={{ width: "100%", height: "100%" }} />
 
-      <button onClick={goToLastQR} className="absolute bottom-44 right-5 z-[1000] w-12 h-12 rounded-full bg-white shadow-lg flex items-center justify-center">
-        <img src="/images/map.png" className="w-8 h-8" alt="Map" />
+      {/* Buttons */}
+      <button onClick={goToLastQR} style={{ position: "absolute", bottom: "170px", right: "20px", zIndex: 1000, borderRadius: "50%", width: "50px", height: "50px", display: "flex", justifyContent: "center", alignItems: "center", boxShadow: "0 4px 10px rgba(0,0,0,0.3)", border: "none", cursor: "pointer", backgroundColor: "white" }}>
+        <img src="/images/map.png" style={{ width: "32px", height: "32px" }} alt="Map" />
       </button>
 
-      <button onClick={relocateToUser} className="absolute bottom-28 right-5 z-[1000] w-12 h-12 rounded-full bg-white shadow-lg flex items-center justify-center">
-        <img src="/images/playericon.png" className="w-10 h-10" alt="Player" />
+      <button onClick={relocateToUser} style={{ position: "absolute", bottom: "100px", right: "20px", zIndex: 1000, borderRadius: "50%", width: "50px", height: "50px", display: "flex", justifyContent: "center", alignItems: "center", boxShadow: "0 4px 10px rgba(0,0,0,0.3)", border: "none", cursor: "pointer", backgroundColor: "white" }}>
+        <img src="/images/playericon.png" style={{ width: "40px", height: "40px" }} alt="Player" />
       </button>
 
+      {/* Bottom Floating Bar - CONVERTED TO INLINE STYLES */}
       {isInsidePlayArea && mapReady && !scanning && !scannedData && (
-        <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
-          <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
-            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
+        <div style={{
+          position: "fixed",
+          bottom: "12px", // Fixed bottom position
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          width: "70%", // Base width
+          maxWidth: "448px", // max-w-md
+          backgroundColor: "white",
+          padding: "8px", // p-2
+          borderRadius: "9999px", // rounded-full
+          boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)", // shadow-lg
+          zIndex: 50
+        }}>
+          <Link href="/leaderboard" style={{
+            padding: "12px", // p-3
+            borderRadius: "50%",
+            transition: "background-color 0.15s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textDecoration: "none",
+          }}>
+            {/* SVG for Leaderboard (text-black) */}
+            <svg width="24" height="24" viewBox="0 0 24 24" stroke="black" strokeWidth="2" fill="none" style={{ transition: "stroke 0.15s ease" }}>
               <line x1="3" y1="6" x2="21" y2="6" />
               <line x1="3" y1="12" x2="21" y2="12" />
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </Link>
 
-          <div onClick={startScanner} className="flex justify-center items-center w-14 h-14 sm:w-16 sm:h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
-            <svg width="28" height="28" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none" className="sm:w-8 sm:h-8">
+          <div onClick={startScanner} style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            width: "64px", // w-16
+            height: "64px", // h-16
+            backgroundColor: "#dc2626", // bg-red-600
+            borderRadius: "50%",
+            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)", // shadow-lg
+            cursor: "pointer",
+            transition: "background-color 0.15s ease",
+          }}>
+            {/* SVG for Scanner (stroke-white) */}
+            <svg width="32" height="32" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none">
               <path d="M3 7V3H7" />
               <path d="M17 3H21V7" />
               <path d="M3 17V21H7" />
@@ -537,8 +513,18 @@ export default function FastMapComponent({
             </svg>
           </div>
 
-          <Link href="/profile" className="group p-3 rounded-full hover:bg-black transition">
-            <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
+
+          <Link href="/profile" style={{
+            padding: "12px", // p-3
+            borderRadius: "50%",
+            transition: "background-color 0.15s ease",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            textDecoration: "none",
+          }}>
+            {/* SVG for Profile (text-black) */}
+            <svg width="24" height="24" viewBox="0 0 24 24" stroke="black" strokeWidth="2" fill="none" style={{ transition: "stroke 0.15s ease" }}>
               <path d="M3 10L12 3L21 10" />
               <path d="M5 10V21H19V10" />
             </svg>
@@ -546,37 +532,32 @@ export default function FastMapComponent({
         </div>
       )}
 
+      {/* QR Popup & Reward Popup - unchanged */}
       {selectedQR && (
         <>
-          <div onClick={() => setSelectedQR(null)} className="fixed inset-0 bg-black/50 z-[999]" />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl p-8 w-11/12 max-w-md shadow-2xl z-[1000] max-h-[90vh] overflow-y-auto">
-            {selectedQR.picture && (
-              <img src={selectedQR.picture} alt={selectedQR.name} className="w-full h-56 object-cover rounded-2xl mb-6" />
-            )}
-            <h2 className="text-3xl font-bold text-center mb-4">{selectedQR.name}</h2>
-            <p className="text-xl text-center mb-6">
-              Points: <span className={scannedQRIds.has(selectedQR.id) ? "text-green-600 font-bold" : "text-gray-600"}>
-                {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "Scanned"}
+          <div onClick={() => setSelectedQR(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 999 }} />
+          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: "white", borderRadius: "16px", padding: "24px", width: "90%", maxWidth: "400px", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.4)", zIndex: 1000 }}>
+            {selectedQR.picture && <img src={selectedQR.picture} alt={selectedQR.name} style={{ width: "100%", height: "200px", objectFit: "cover", borderRadius: "12px", marginBottom: "16px" }} />}
+            <h2 style={{ color: "black", margin: "0 0 8px", fontSize: "28px", fontWeight: "bold" }}>{selectedQR.name}</h2>
+            <div className="flex justify-between mb-4 text-lg font-semibold">
+              <span style={{ color: scannedQRIds.has(selectedQR.id) ? "#10b981" : "black", fontWeight: "600" }}>
+                Points: {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "(Scanned)"}
               </span>
+            </div>
+            <hr style={{ borderTop: "1px solid #e5e7eb", margin: "16px 0" }} />
+            <p style={{ color: "black", margin: "0 0 24px", fontSize: "16px", lineHeight: "1.6" }}>
+              {selectedQR.description || "No description available."}
             </p>
 
             {scannedQRIds.has(selectedQR.id) && (
-              <button
-                onClick={() => checkReward(selectedQR.name)}
-                disabled={checkingReward}
-                className={`w-full py-4 rounded-2xl font-bold text-white text-lg transition ${checkingReward
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-gradient-to-r from-orange-500 to-orange-500 hover:shadow-xl"
-                  }`}
-              >
-                {checkingReward ? "Checking..." : "Check Reward!"}
+              <button onClick={() => checkReward(selectedQR.name)} disabled={checkingReward}
+                style={{ width: "100%", padding: "14px", backgroundColor: checkingReward ? "#9ca3af" : "#eab308", color: "white", border: "none", borderRadius: "12px", fontSize: "18px", fontWeight: "bold", marginBottom: "12px", cursor: checkingReward ? "not-allowed" : "pointer" }}>
+                {checkingReward ? "Checking..." : "Check Reward"}
               </button>
             )}
 
-            <button
-              onClick={() => setSelectedQR(null)}
-              className="w-full mt-4 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-2xl transition"
-            >
+            <button onClick={() => setSelectedQR(null)}
+              style={{ width: "100%", padding: "14px", backgroundColor: "#ef4444", color: "white", border: "none", borderRadius: "12px", fontSize: "18px", fontWeight: "bold" }}>
               Close
             </button>
           </div>
@@ -585,53 +566,36 @@ export default function FastMapComponent({
 
       {rewardPopup && (
         <>
-          <div onClick={closeRewardPopup} className="fixed inset-0 bg-black/80 z-[1001]" />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl p-10 w-11/12 max-w-lg text-center shadow-2xl z-[1002]">
-            <div className="p-8">
-              {rewardPopup.type === "success" && rewardPopup.prizeCode ? (
-                <img src={rewardPopup.imgUrl || "/animation/gift.gif"} alt="Won" className="w-48 h-48 mx-auto mb-6" />
+          <div onClick={closeRewardPopup} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1001 }} />
+          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", background: "white", borderRadius: "16px", padding: "32px", width: "90%", maxWidth: "400px", textAlign: "center", boxShadow: "0 10px 40px rgba(0,0,0,0.4)", zIndex: 1002 }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
+              {rewardPopup.type === "success" && rewardPopup.imgUrl ? (
+                <img src={rewardPopup.imgUrl} alt="Reward" style={{ width: "128px", height: "128px", objectFit: "contain", borderRadius: "8px" }} />
+              ) : rewardPopup.type === "success" && rewardPopup.prizeCode ? (
+                <img src="/animation/gift.gif" alt="Reward" style={{ width: "160px", height: "160px", objectFit: "contain" }} />
               ) : (
-                <img src="/animation/confuse.gif" alt="No prize" className="w-32 h-32 mx-auto mb-6" />
+                <img src="/animation/confuse.gif" alt="Info" style={{ width: "128px", height: "128px", objectFit: "contain" }} />
               )}
-
-              <h1 className="text-4xl font-bold mb-4">
-                {rewardPopup.type === "success" ? "You Won!" : "No Prize Yet"}
-              </h1>
-
-              <p className="text-xl text-gray-700 mb-8">{rewardPopup.message}</p>
-
-              {rewardPopup.prizeCode && (
-                <div className="bg-gradient-to-r from-amber-100 to-orange-100 border-4 border-amber-400 rounded-3xl p-6 mb-8">
-                  <p className="text-amber-800 font-bold mb-3">Your Prize Code:</p>
-                  <p className="text-5xl font-black text-amber-600 tracking-widest">
-                    {rewardPopup.prizeCode}
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={closeRewardPopup}
-                className="w-full py-5 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-2xl font-bold rounded-3xl shadow-xl hover:shadow-2xl transition"
-              >
-                Continue
-              </button>
             </div>
-          </div>
-        </>
-      )}
-
-      {showTooFarPopup && (
-        <>
-          <div className="fixed inset-0 bg-black/90 z-[1003]" />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl p-10 w-11/12 max-w-md text-center shadow-2xl z-[1004]">
-            <img src="/animation/confuse.gif" alt="Too far" className="w-32 mx-auto mb-6" />
-            <h1 className="text-3xl font-bold text-red-600 mb-4">You're Too Far!</h1>
-            <p className="text-lg mb-6 text-black">Come within 1km of Thamel to play</p>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="w-full bg-black text-white px-8 py-3 rounded-full text-lg font-bold hover:bg-gray-800 transition"
-            >
-              Try Again
+            <h1 style={{ color: "#1f2937", margin: "0 0 8px", fontSize: "24px", fontWeight: "bold" }}>
+              {rewardPopup.type === "success" && rewardPopup.prizeCode ? "Reward Received!" : 
+               rewardPopup.type === "success" ? "Points Claimed!" :
+               "Error"}
+            </h1>
+            <p style={{ color: "#374151", margin: "8px 0 24px", fontSize: "18px", lineHeight: "1.6", fontWeight: "600" }}>
+              {rewardPopup.message}
+            </p>
+            {rewardPopup.prizeCode && (
+              <div style={{ padding: "16px", backgroundColor: "#fef3c7", border: "2px solid #f59e0b", borderRadius: "8px", margin: "16px 0" }}>
+                <p style={{ color: "#78716c", margin: "0 0 4px" }}>Your Prize Code:</p>
+                <p style={{ color: "#d97706", margin: 0, fontSize: "24px", fontWeight: "bold", letterSpacing: "2px" }}>
+                  {rewardPopup.prizeCode}
+                </p>
+              </div>
+            )}
+            <button onClick={closeRewardPopup}
+              style={{ width: "100%", padding: "12px 40px", backgroundColor: "#16a34a", color: "white", border: "none", borderRadius: "9999px", fontSize: "18px", fontWeight: "600", cursor: "pointer" }}>
+              Continue
             </button>
           </div>
         </>
