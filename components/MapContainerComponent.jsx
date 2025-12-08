@@ -316,7 +316,7 @@ export default function FastMapComponent({
           style: "https://map-init.gallimap.com/styles/light/style.json",
           center: [userLocation.lng, userLocation.lat],
           zoom: 16,
-          minZoom: 14,
+          minZoom: 13,
           maxZoom: 21,
         },
         pano: { container: "hidden-pano" },
