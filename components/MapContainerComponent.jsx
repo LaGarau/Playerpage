@@ -475,19 +475,22 @@ export default function FastMapComponent({
       </div>
     );
   }
-
-  return (
+return (
+  <>
     <div ref={mapContainerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div id="galli-map" style={{ width: "100%", height: "100%" }} />
-
-      <button onClick={goToLastQR} className="absolute bottom-[72px] right-3 sm:right-5 z-[1000] w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white shadow-lg flex items-center justify-center">
+      <button
+        onClick={goToLastQR}
+        className="absolute bottom-[140px] right-3 sm:right-5 z-[1000] w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white shadow-lg flex items-center justify-center"
+      >
         <img src="/images/map.png" className="w-6 h-6 sm:w-8 sm:h-8" alt="Map" />
       </button>
-
-      <button onClick={relocateToUser} className="absolute bottom-[28px] right-3 sm:right-5 z-[1000] w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white shadow-lg flex items-center justify-center">
+      <button
+        onClick={relocateToUser}
+        className="absolute bottom-[88px] right-3 sm:right-5 z-[1000] w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-white shadow-lg flex items-center justify-center"
+      >
         <img src="/images/playericon.png" className="w-7 h-7 sm:w-10 sm:h-10" alt="Player" />
       </button>
-
       {isInsidePlayArea && mapReady && !scanning && !scannedData && (
         <div className="fixed bottom-2 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[75%] sm:w-[60%] max-w-md bg-white px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-lg z-50">
           <Link href="/leaderboard" className="group p-1.5 sm:p-2 rounded-full hover:bg-black transition">
@@ -497,7 +500,6 @@ export default function FastMapComponent({
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </Link>
-
           <div onClick={startScanner} className="flex justify-center items-center w-11 h-11 sm:w-14 sm:h-14 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
             <svg width="22" height="22" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none" className="sm:w-7 sm:h-7">
               <path d="M3 7V3H7" />
@@ -510,7 +512,6 @@ export default function FastMapComponent({
               <rect x="14" y="13" width="2" height="2" rx="0.5" fill="white" />
             </svg>
           </div>
-
           <Link href="/profile" className="group p-1.5 sm:p-2 rounded-full hover:bg-black transition">
             <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
               <path d="M3 10L12 3L21 10" />
@@ -519,97 +520,92 @@ export default function FastMapComponent({
           </Link>
         </div>
       )}
+    </div>
 
-      {selectedQR && (
-        <>
-          <div onClick={() => setSelectedQR(null)} className="fixed inset-0 bg-black/50 z-[999]" />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 w-[90%] sm:w-11/12 max-w-md shadow-2xl z-[1000] max-h-[90vh] overflow-y-auto">
-            {selectedQR.picture && (
-              <img src={selectedQR.picture} alt={selectedQR.name} className="w-full h-40 sm:h-56 object-cover rounded-xl sm:rounded-2xl mb-4 sm:mb-6" />
-            )}
-            <h2 className="text-2xl sm:text-3xl font-bold text-center mb-3 sm:mb-4">{selectedQR.name}</h2>
-            <p className="text-lg sm:text-xl text-center mb-4 sm:mb-6">
-              Points: <span className={scannedQRIds.has(selectedQR.id) ? "text-green-600 font-bold" : "text-gray-600"}>
-                {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "Scanned"}
-              </span>
-            </p>
-
-            {scannedQRIds.has(selectedQR.id) && (
-              <button
-                onClick={() => checkReward(selectedQR.name)}
-                disabled={checkingReward}
-                className={`w-full py-3 sm:py-4 rounded-xl sm:rounded-2xl font-bold text-white text-base sm:text-lg transition ${checkingReward
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-gradient-to-r from-orange-500 to-orange-500 hover:shadow-xl"
-                  }`}
-              >
-                {checkingReward ? "Checking..." : "Check Reward!"}
-              </button>
-            )}
-
+    {selectedQR && (
+      <>
+        <div onClick={() => setSelectedQR(null)} className="fixed inset-0 bg-black/50 z-[999]" />
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-8 w-[90%] sm:w-11/12 max-w-md shadow-2xl z-[1000] max-h-[90vh] overflow-y-auto">
+          {selectedQR.picture && (
+            <img src={selectedQR.picture} alt={selectedQR.name} className="w-full h-40 sm:h-56 object-cover rounded-xl sm:rounded-2xl mb-4 sm:mb-6" />
+          )}
+          <h2 className="text-2xl sm:text-3xl font-bold text-center mb-3 sm:mb-4">{selectedQR.name}</h2>
+          <p className="text-lg sm:text-xl text-center mb-4 sm:mb-6">
+            Points: <span className={scannedQRIds.has(selectedQR.id) ? "text-green-600 font-bold" : "text-gray-600"}>
+              {selectedQR.points || 0} {scannedQRIds.has(selectedQR.id) && "Scanned"}
+            </span>
+          </p>
+          {scannedQRIds.has(selectedQR.id) && (
             <button
-              onClick={() => setSelectedQR(null)}
-              className="w-full mt-3 sm:mt-4 py-3 sm:py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl sm:rounded-2xl transition"
+              onClick={() => checkReward(selectedQR.name)}
+              disabled={checkingReward}
+              className={`w-full py-3 sm:py-4 rounded-xl sm:rounded-2xl font-bold text-white text-base sm:text-lg transition ${checkingReward
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-gradient-to-r from-orange-500 to-orange-500 hover:shadow-xl"
+              }`}
             >
-              Close
+              {checkingReward ? "Checking..." : "Check Reward!"}
+            </button>
+          )}
+          <button
+            onClick={() => setSelectedQR(null)}
+            className="w-full mt-3 sm:mt-4 py-3 sm:py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl sm:rounded-2xl transition"
+          >
+            Close
+          </button>
+        </div>
+      </>
+    )}
+
+    {rewardPopup && (
+      <>
+        <div onClick={closeRewardPopup} className="fixed inset-0 bg-black/80 z-[1001]" />
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-[90%] sm:w-11/12 max-w-lg text-center shadow-2xl z-[1002]">
+          <div className="p-4 sm:p-8">
+            {rewardPopup.type === "success" && rewardPopup.prizeCode ? (
+              <img src={rewardPopup.imgUrl || "/animation/cheer.gif"} alt="Won" className="w-32 h-32 sm:w-48 sm:h-48 mx-auto mb-4 sm:mb-6" />
+            ) : (
+              <img src="/animation/confuse.gif" alt="No prize" className="w-24 h-24 sm:w-32 sm:h-32 mx-auto mb-4 sm:mb-6" />
+            )}
+            <h1 className="text-2xl sm:text-4xl font-bold mb-3 sm:mb-4">
+              {rewardPopup.type === "success" ? "You Won!" : "No Prize Yet"}
+            </h1>
+            <p className="text-base sm:text-xl text-gray-700 mb-5 sm:mb-8">{rewardPopup.message}</p>
+            {rewardPopup.prizeCode && (
+              <div className="bg-gradient-to-r from-amber-100 to-orange-100 border-4 border-amber-400 rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-5 sm:mb-8">
+                <p className="text-amber-800 font-bold mb-2 sm:mb-3 text-sm sm:text-base">Your Prize Code:</p>
+                <p className="text-3xl sm:text-5xl font-black text-amber-600 tracking-widest">
+                  {rewardPopup.prizeCode}
+                </p>
+              </div>
+            )}
+            <button
+              onClick={closeRewardPopup}
+              className="w-full py-3 sm:py-5 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-lg sm:text-2xl font-bold rounded-2xl sm:rounded-3xl shadow-xl hover:shadow-2xl transition"
+            >
+              Continue
             </button>
           </div>
-        </>
-      )}
+        </div>
+      </>
+    )}
 
-      {rewardPopup && (
-        <>
-          <div onClick={closeRewardPopup} className="fixed inset-0 bg-black/80 z-[1001]" />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-[90%] sm:w-11/12 max-w-lg text-center shadow-2xl z-[1002]">
-            <div className="p-4 sm:p-8">
-              {rewardPopup.type === "success" && rewardPopup.prizeCode ? (
-                <img src={rewardPopup.imgUrl || "/animation/gift.gif"} alt="Won" className="w-32 h-32 sm:w-48 sm:h-48 mx-auto mb-4 sm:mb-6" />
-              ) : (
-                <img src="/animation/confuse.gif" alt="No prize" className="w-24 h-24 sm:w-32 sm:h-32 mx-auto mb-4 sm:mb-6" />
-              )}
-
-              <h1 className="text-2xl sm:text-4xl font-bold mb-3 sm:mb-4">
-                {rewardPopup.type === "success" ? "You Won!" : "No Prize Yet"}
-              </h1>
-
-              <p className="text-base sm:text-xl text-gray-700 mb-5 sm:mb-8">{rewardPopup.message}</p>
-
-              {rewardPopup.prizeCode && (
-                <div className="bg-gradient-to-r from-amber-100 to-orange-100 border-4 border-amber-400 rounded-2xl sm:rounded-3xl p-4 sm:p-6 mb-5 sm:mb-8">
-                  <p className="text-amber-800 font-bold mb-2 sm:mb-3 text-sm sm:text-base">Your Prize Code:</p>
-                  <p className="text-3xl sm:text-5xl font-black text-amber-600 tracking-widest">
-                    {rewardPopup.prizeCode}
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={closeRewardPopup}
-                className="w-full py-3 sm:py-5 bg-gradient-to-r from-green-500 to-emerald-600 text-white text-lg sm:text-2xl font-bold rounded-2xl sm:rounded-3xl shadow-xl hover:shadow-2xl transition"
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-
-      {showTooFarPopup && (
-        <>
-          <div className="fixed inset-0 bg-black/90 z-[1003]" />
-          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-[90%] sm:w-11/12 max-w-md text-center shadow-2xl z-[1004]">
-            <img src="/animation/confuse.gif" alt="Too far" className="w-24 sm:w-32 mx-auto mb-4 sm:mb-6" />
-            <h1 className="text-2xl sm:text-3xl font-bold text-red-600 mb-3 sm:mb-4">You're Too Far!</h1>
-            <p className="text-base sm:text-lg mb-4 sm:mb-6 text-black">Come within 1km of Thamel to play</p>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="w-full bg-black text-white px-8 py-3 rounded-full text-lg font-bold hover:bg-gray-800 transition"
-            >
-              Try Again
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
+    {showTooFarPopup && (
+      <>
+        <div className="fixed inset-0 bg-black/90 z-[1003]" />
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl sm:rounded-3xl p-6 sm:p-10 w-[90%] sm:w-11/12 max-w-md text-center shadow-2xl z-[1004]">
+          <img src="/animation/confuse.gif" alt="Too far" className="w-24 sm:w-32 mx-auto mb-4 sm:mb-6" />
+          <h1 className="text-2xl sm:text-3xl font-bold text-red-600 mb-3 sm:mb-4">You're Too Far!</h1>
+          <p className="text-base sm:text-lg mb-4 sm:mb-6 text-black">Come within 1km of Thamel to play</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full bg-black text-white px-8 py-3 rounded-full text-lg font-bold hover:bg-gray-800 transition"
+          >
+            Try Again
+          </button>
+        </div>
+      </>
+    )}
+  </>
+);
 }
