@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ref as dbRef, get, update, set } from "firebase/database"; // ← Added "set"
+import { ref as dbRef, get, update, set } from "firebase/database";
 import { realtimeDb, auth } from "../lib/firebase";
 
 const DEFAULT_MARKER = "/images/navPointLogo.png";
@@ -53,15 +53,69 @@ export default function FastMapComponent({
   const [rewardPopup, setRewardPopup] = useState(null);
   const [isInsidePlayArea, setIsInsidePlayArea] = useState(null);
   const [locationChecked, setLocationChecked] = useState(false);
+  const [rulesAccepted, setRulesAccepted] = useState(false);
+  const [checkingRulesStatus, setCheckingRulesStatus] = useState(true);
+  const [showTooFarPopup, setShowTooFarPopup] = useState(false);
 
   const PLAYER_MARKER_SIZE = 50;
   const PLAYER_MARKER_ICON = "/images/playerlocation.png";
   const playerMarkerRef = useRef(null);
-  // Check location
+
+  // Check if user has already accepted rules
   useEffect(() => {
+    const checkRulesAcceptance = async () => {
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          setRulesAccepted(false);
+          setCheckingRulesStatus(false);
+          return;
+        }
+
+        const rulesRef = dbRef(realtimeDb, `Users/${user.uid}/rulesAccepted`);
+        const rulesSnap = await get(rulesRef);
+        
+        if (rulesSnap.exists() && rulesSnap.val() === true) {
+          setRulesAccepted(true);
+        } else {
+          setRulesAccepted(false);
+        }
+      } catch (err) {
+        console.error("Failed to check rules status:", err);
+        setRulesAccepted(false);
+      } finally {
+        setCheckingRulesStatus(false);
+      }
+    };
+
+    checkRulesAcceptance();
+  }, []);
+
+  // Accept rules and save to database
+  const acceptRules = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        alert("Please login first");
+        return;
+      }
+
+      await set(dbRef(realtimeDb, `Users/${user.uid}/rulesAccepted`), true);
+      setRulesAccepted(true);
+    } catch (err) {
+      console.error("Failed to save rules acceptance:", err);
+      alert("Error saving acceptance. Please try again.");
+    }
+  };
+
+  // Check location - ONLY AFTER RULES ARE ACCEPTED
+  useEffect(() => {
+    if (!rulesAccepted || checkingRulesStatus) return;
+    
     if (!navigator.geolocation) {
       setIsInsidePlayArea(false);
       setLocationChecked(true);
+      setTimeout(() => setShowTooFarPopup(true), 3000);
       return;
     }
 
@@ -70,92 +124,88 @@ export default function FastMapComponent({
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setUserLocation(loc);
         const dist = getDistance(PLAY_AREA_CENTER.lat, PLAY_AREA_CENTER.lng, loc.lat, loc.lng);
-        setIsInsidePlayArea(dist <= PLAY_AREA_RADIUS_METERS);
+        const inside = dist <= PLAY_AREA_RADIUS_METERS;
+        setIsInsidePlayArea(inside);
         setLocationChecked(true);
+        
+        if (!inside) {
+          setTimeout(() => setShowTooFarPopup(true), 3000);
+        }
       },
       () => {
         setIsInsidePlayArea(false);
         setLocationChecked(true);
+        setTimeout(() => setShowTooFarPopup(true), 3000);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
       }
     );
-  }, []);
+  }, [rulesAccepted, checkingRulesStatus]);
 
-  
-  // RESTORED & MODIFIED: Check reward logic using ONLY the PrizeWon table
- const checkReward = async (qrName) => {
-  setCheckingReward(true);
-  try {
-    const user = auth.currentUser;
-    if (!user) {
-      setRewardPopup({ 
-        type: "error", 
-        message: "Please login to check rewards" 
-      });
-      setCheckingReward(false);
-      return;
-    }
-
-    const userProfileRef = dbRef(realtimeDb, `Users/${user.uid}`);
-    const userProfileSnap = await get(userProfileRef);
-    const username = userProfileSnap.exists() 
-      ? userProfileSnap.val().username 
-      : user.displayName || "guest";
-    
-    console.log("Checking reward for:", { username, userId: user.uid });
-
-    // 🔥 Check PrizeWon table directly using userId
-    const prizeWonRef = dbRef(realtimeDb, `PrizeWon/${user.uid}`);
-    const prizeWonSnap = await get(prizeWonRef);
-
-    if (prizeWonSnap.exists()) {
-      const prizeData = prizeWonSnap.val();
-      
-      // User has won a prize!
-      setRewardPopup({
-        type: "success",
-        message: `🎉 Congratulations ${username}! You completed all 8 scans and won a prize!`,
-        imgUrl: prizeData.imgUrl || "",
-        prizeCode: prizeData.prizeCode,
-        wonAt: prizeData.wonAt,
-        scannedCodes: prizeData.scannedCodes || [],
-        alreadyClaimed: false
-      });
-      
-      console.log("Prize found:", prizeData.prizeCode);
-    } else {
-      // User hasn't won yet
-      // Check how many unique scans they have
-      const scansRef = dbRef(realtimeDb, "scannedQRCodes");
-      const scansSnap = await get(scansRef);
-      
-      let userScansCount = 0;
-      if (scansSnap.exists()) {
-        const allScans = scansSnap.val();
-        const userScans = Object.values(allScans).filter(s => s.userId === user.uid);
-        userScansCount = new Set(userScans.map(s => s.qrName)).size;
+  const checkReward = async (qrName) => {
+    setCheckingReward(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        setRewardPopup({ 
+          type: "error", 
+          message: "Please login to check rewards" 
+        });
+        setCheckingReward(false);
+        return;
       }
 
+      const userProfileRef = dbRef(realtimeDb, `Users/${user.uid}`);
+      const userProfileSnap = await get(userProfileRef);
+      const username = userProfileSnap.exists() 
+        ? userProfileSnap.val().username 
+        : user.displayName || "guest";
+
+      const prizeWonRef = dbRef(realtimeDb, `PrizeWon/${user.uid}`);
+      const prizeWonSnap = await get(prizeWonRef);
+
+      if (prizeWonSnap.exists()) {
+        const prizeData = prizeWonSnap.val();
+        
+        setRewardPopup({
+          type: "success",
+          message: `🎉 Congratulations ${username}! You completed all 8 scans and won a prize!`,
+          imgUrl: prizeData.imgUrl || "",
+          prizeCode: prizeData.prizeCode,
+          wonAt: prizeData.wonAt,
+          scannedCodes: prizeData.scannedCodes || [],
+          alreadyClaimed: false
+        });
+      } else {
+        const scansRef = dbRef(realtimeDb, "scannedQRCodes");
+        const scansSnap = await get(scansRef);
+        
+        let userScansCount = 0;
+        if (scansSnap.exists()) {
+          const allScans = scansSnap.val();
+          const userScans = Object.values(allScans).filter(s => s.userId === user.uid);
+          userScansCount = new Set(userScans.map(s => s.qrName)).size;
+        }
+
+        setRewardPopup({
+          type: "info",
+          message: `You have scanned ${userScansCount}/8 unique QR codes. Scan ${8 - userScansCount} more to win a prize!`
+        });
+      }
+    } catch (error) {
+      console.error("Error checking rewards:", error);
       setRewardPopup({
-        type: "info",
-        message: `You have scanned ${userScansCount}/8 unique QR codes. Scan ${8 - userScansCount} more to win a prize!`
+        type: "error",
+        message: "Error checking rewards. Please try again."
       });
-      
-      console.log("No prize yet. User scans:", userScansCount);
+    } finally {
+      setCheckingReward(false);
     }
-  } catch (error) {
-    console.error("Error checking rewards:", error);
-    setRewardPopup({
-      type: "error",
-      message: "Error checking rewards. Please try again."
-    });
-  } finally {
-    setCheckingReward(false);
-  }
-};
+  };
 
-
-
-  // Close popup and mark prize as claimed
   const closeRewardPopup = async () => {
     if (rewardPopup?.prizeKey && !rewardPopup?.alreadyClaimed) {
       try {
@@ -180,7 +230,6 @@ export default function FastMapComponent({
     });
   };
 
-  // --- Update player marker ---
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current || !userLocation) return;
 
@@ -209,7 +258,6 @@ export default function FastMapComponent({
     mapPlugin.map.setCenter([userLocation.lng, userLocation.lat]);
   }, [mapReady, userLocation]);
 
-  // --- Go to last QR button ---
   const goToLastQR = () => {
     if (!mapInstanceRef.current || !qrList?.length) return;
 
@@ -228,8 +276,6 @@ export default function FastMapComponent({
     });
   };
 
-
-  // Save player location
   useEffect(() => {
     if (!userLocation) return;
 
@@ -258,7 +304,6 @@ export default function FastMapComponent({
     return () => clearInterval(intervalId);
   }, [userLocation]);
 
-  // --- Initialize map ONLY if inside play area ---
   useEffect(() => {
     if (!userLocation || mapInstanceRef.current || !isInsidePlayArea) return;
 
@@ -330,7 +375,6 @@ export default function FastMapComponent({
     };
   }, [userLocation, isInsidePlayArea]);
 
-  // --- QR markers ---
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
     const map = mapInstanceRef.current.map;
@@ -393,41 +437,66 @@ export default function FastMapComponent({
     });
   }, [qrList, scannedQRIds, mapReady]);
 
-  // --- RENDER: Show popup if far, otherwise show map ---
-  if (!locationChecked || isInsidePlayArea === null) {
+  // RENDER: Loading state (checking rules status)
+  if (checkingRulesStatus) {
     return (
       <div style={{ width: "100%", height: "100vh", background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "24px", marginBottom: "16px" }}>Checking your location...</div>
+          <div style={{ fontSize: "24px", marginBottom: "16px" }}>Loading...</div>
           <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-yellow-500 mx-auto"></div>
         </div>
       </div>
     );
   }
 
-
-
-  
-  if (!isInsidePlayArea) {
+  // RENDER: Rules screen FIRST (before location check)
+  if (!rulesAccepted) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-800">
-        <div className="bg-white p-10 rounded-2xl text-center max-w-md">
-          <img src="/animation/confuse.gif" alt="Too far" className="w-32 mx-auto mb-6" />
-          <h1 className="text-3xl font-bold text-red-600 mb-4">You're Too Far!</h1>
-          <p className="text-lg mb-6 text-black">Come within 2km of Thamel to play</p>
-          <button onClick={() => window.location.reload()} className="bg-black text-white px-8 py-3 rounded-full text-lg font-bold">
-            Try Again
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 p-4">
+        <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 max-h-[90vh] overflow-y-auto">
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-black text-gray-900 mb-2">Before You Play</h1>
+            <p className="text-xl text-gray-600 font-semibold">Quick Rules</p>
+          </div>
+
+          <div className="space-y-4 mb-8">
+            {[
+              "One account per player.",
+              "Scan all available QR codes to earn one prize (while supplies last).",
+              "Don't take or share photos of QR codes.",
+              "Don't damage, tamper with, or remove QR codes.",
+              "Respect each participating location — follow their rules and staff instructions.",
+              "No cheating, automation, or exploits.",
+              "Prizes are first-come, first-served.",
+              "Be considerate of other players and don't block QR codes.",
+              "Stay safe and avoid restricted areas.",
+              "Supporting our partner establishments with a Google Review or social post is greatly appreciated!"
+            ].map((rule, idx) => (
+              <div key={idx} className="flex items-start gap-4 bg-gray-50 p-4 rounded-xl hover:bg-gray-100 transition">
+                <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
+                  {idx + 1}
+                </div>
+                <p className="text-gray-800 text-lg leading-relaxed">{rule}</p>
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={acceptRules}
+            className="w-full py-5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white text-2xl font-bold rounded-2xl shadow-xl hover:shadow-2xl transition transform hover:scale-105"
+          >
+            I Accept — Let's Play! 🎮
           </button>
         </div>
       </div>
     );
   }
 
+  // RENDER: Main map view
   return (
     <div ref={mapContainerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div id="galli-map" style={{ width: "100%", height: "100%" }} />
 
-      {/* Buttons */}
       <button onClick={goToLastQR} className="absolute bottom-44 right-5 z-[1000] w-12 h-12 rounded-full bg-white shadow-lg flex items-center justify-center">
         <img src="/images/map.png" className="w-8 h-8" alt="Map" />
       </button>
@@ -436,41 +505,38 @@ export default function FastMapComponent({
         <img src="/images/playericon.png" className="w-10 h-10" alt="Player" />
       </button>
 
-      {/* Bottom Bar - Fixed closing tag */}
       {isInsidePlayArea && mapReady && !scanning && !scannedData && (
-          <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
-            <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
-              <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
-            </Link>
+        <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
+          <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
+            <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </Link>
 
-            <div onClick={startScanner} className="flex justify-center items-center w-14 h-14 sm:w-16 sm:h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
-              <svg width="28" height="28" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none" className="sm:w-8 sm:h-8">
-                <path d="M3 7V3H7" />
-                <path d="M17 3H21V7" />
-                <path d="M3 17V21H7" />
-                <path d="M17 21H21V17" />
-                <rect x="8" y="8.5" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="14" y="8.5" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="8" y="13" width="2" height="2" rx="0.5" fill="white" />
-                <rect x="14" y="13" width="2" height="2" rx="0.5" fill="white" />
-              </svg>
-            </div>
-
-
-            <Link href="/profile" className="group p-3 rounded-full hover:bg-black transition">
-              <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
-                <path d="M3 10L12 3L21 10" />
-                <path d="M5 10V21H19V10" />
-              </svg>
-            </Link>
+          <div onClick={startScanner} className="flex justify-center items-center w-14 h-14 sm:w-16 sm:h-16 bg-red-600 rounded-full shadow-lg cursor-pointer hover:bg-red-700 transition">
+            <svg width="28" height="28" viewBox="0 0 24 24" stroke="white" strokeWidth="2" fill="none" className="sm:w-8 sm:h-8">
+              <path d="M3 7V3H7" />
+              <path d="M17 3H21V7" />
+              <path d="M3 17V21H7" />
+              <path d="M17 21H21V17" />
+              <rect x="8" y="8.5" width="2" height="2" rx="0.5" fill="white" />
+              <rect x="14" y="8.5" width="2" height="2" rx="0.5" fill="white" />
+              <rect x="8" y="13" width="2" height="2" rx="0.5" fill="white" />
+              <rect x="14" y="13" width="2" height="2" rx="0.5" fill="white" />
+            </svg>
           </div>
-        )}
 
-      {/* QR Popup */}
+          <Link href="/profile" className="group p-3 rounded-full hover:bg-black transition">
+            <svg width="24" height="24" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="text-black group-hover:text-white">
+              <path d="M3 10L12 3L21 10" />
+              <path d="M5 10V21H19V10" />
+            </svg>
+          </Link>
+        </div>
+      )}
+
       {selectedQR && (
         <>
           <div onClick={() => setSelectedQR(null)} className="fixed inset-0 bg-black/50 z-[999]" />
@@ -508,7 +574,6 @@ export default function FastMapComponent({
         </>
       )}
 
-      {/* Reward Popup */}
       {rewardPopup && (
         <>
           <div onClick={closeRewardPopup} className="fixed inset-0 bg-black/80 z-[1001]" />
@@ -542,6 +607,23 @@ export default function FastMapComponent({
                 Continue
               </button>
             </div>
+          </div>
+        </>
+      )}
+
+      {showTooFarPopup && (
+        <>
+          <div className="fixed inset-0 bg-black/90 z-[1003]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl p-10 w-11/12 max-w-md text-center shadow-2xl z-[1004]">
+            <img src="/animation/confuse.gif" alt="Too far" className="w-32 mx-auto mb-6" />
+            <h1 className="text-3xl font-bold text-red-600 mb-4">You're Too Far!</h1>
+            <p className="text-lg mb-6 text-black">Come within 1km of Thamel to play</p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="w-full bg-black text-white px-8 py-3 rounded-full text-lg font-bold hover:bg-gray-800 transition"
+            >
+              Try Again
+            </button>
           </div>
         </>
       )}
