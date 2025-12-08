@@ -10,7 +10,8 @@ const MARKER_SIZE = 55;
 const BORDER_WIDTH = "3px";
 const HIGHLIGHT_COLOR = "#10B981";
 
-// Removed PLAY_AREA_CENTER and PLAY_AREA_RADIUS_METERS
+const PLAY_AREA_CENTER = { lat: 27.71386797377799, lng: 85.3101511297507 };
+const PLAY_AREA_RADIUS_METERS = 10000;
 
 const MAP_CENTER = { lat: 27.7172, lng: 85.324 };
 const MAP_MAX_RADIUS_METERS = 10000;
@@ -23,7 +24,6 @@ const getBorderColor = (type) => {
   return map[type.toLowerCase().trim()] || "black";
 };
 
-// getDistance function is kept as it might be used for other purposes (like user-to-QR distance)
 const getDistance = (lat1, lng1, lat2, lng2) => {
   const R = 6371000;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -51,10 +51,16 @@ export default function FastMapComponent({
   const [selectedQR, setSelectedQR] = useState(null);
   const [checkingReward, setCheckingReward] = useState(false);
   const [rewardPopup, setRewardPopup] = useState(null);
-  // Removed isInsidePlayArea and locationChecked states
+  
+  // RESTORED STATES
+  const [isInsidePlayArea, setIsInsidePlayArea] = useState(true); // <-- Set to TRUE by default to skip check
+  const [locationChecked, setLocationChecked] = useState(true); // <-- Set to TRUE by default to skip check
+  
   const [rulesAccepted, setRulesAccepted] = useState(false);
   const [checkingRulesStatus, setCheckingRulesStatus] = useState(true);
-  // Removed showTooFarPopup state
+  
+  // RESTORED STATE
+  const [showTooFarPopup, setShowTooFarPopup] = useState(false); 
 
   const PLAYER_MARKER_SIZE = 50;
   const PLAYER_MARKER_ICON = "/images/playerlocation.png";
@@ -107,21 +113,36 @@ export default function FastMapComponent({
     }
   };
 
-  // Location fetch - now without any boundary check logic
+  // Check location - **LOCATION CHECKING LOGIC COMMENTED OUT**
   useEffect(() => {
     if (!rulesAccepted || checkingRulesStatus) return;
-
+    
     if (!navigator.geolocation) {
-      return; // Silently fail if no geolocation support
+      // setIsInsidePlayArea(false); // Original logic
+      // setLocationChecked(true); // Original logic
+      // setTimeout(() => setShowTooFarPopup(true), 3000); // Original logic
+      return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setUserLocation(loc);
+        
+        // const dist = getDistance(PLAY_AREA_CENTER.lat, PLAY_AREA_CENTER.lng, loc.lat, loc.lng); // Original logic
+        // const inside = dist <= PLAY_AREA_RADIUS_METERS; // Original logic
+        
+        // setIsInsidePlayArea(inside); // Original logic
+        // setLocationChecked(true); // Original logic
+        
+        // if (!inside) { // Original logic
+        //   setTimeout(() => setShowTooFarPopup(true), 3000); // Original logic
+        // } // Original logic
       },
       () => {
-        console.warn("Geolocation failed or denied.");
+        // setIsInsidePlayArea(false); // Original logic
+        // setLocationChecked(true); // Original logic
+        // setTimeout(() => setShowTooFarPopup(true), 3000); // Original logic
       },
       {
         enableHighAccuracy: true,
@@ -216,9 +237,9 @@ export default function FastMapComponent({
     });
   };
 
-  // Player Marker Update
   useEffect(() => {
-    if (!mapReady || !mapInstanceRef.current || !userLocation) return;
+    // Restored isInsidePlayArea check for marker update, but default state is true
+    if (!mapReady || !mapInstanceRef.current || !userLocation || !isInsidePlayArea) return; 
 
     const mapPlugin = mapInstanceRef.current;
 
@@ -242,9 +263,8 @@ export default function FastMapComponent({
       playerMarkerRef.current.setLngLat([userLocation.lat, userLocation.lng]);
     }
 
-    // Optionally center the map on the user's location when it updates
-    // mapPlugin.map.setCenter([userLocation.lng, userLocation.lat]); 
-  }, [mapReady, userLocation]);
+    mapPlugin.map.setCenter([userLocation.lng, userLocation.lat]);
+  }, [mapReady, userLocation, isInsidePlayArea]); // Restored isInsidePlayArea dependency
 
   const goToLastQR = () => {
     if (!mapInstanceRef.current || !qrList?.length) return;
@@ -264,7 +284,6 @@ export default function FastMapComponent({
     });
   };
 
-  // Location saving logic (unaffected by play area removal)
   useEffect(() => {
     if (!userLocation) return;
 
@@ -293,15 +312,11 @@ export default function FastMapComponent({
     return () => clearInterval(intervalId);
   }, [userLocation]);
 
-  // Map Initialization - now defaults to MAP_CENTER if userLocation is null
   useEffect(() => {
-    if (mapInstanceRef.current) return; // Don't re-init if already done
+    // Restored isInsidePlayArea check for map initialization, but default state is true
+    if (!userLocation || mapInstanceRef.current || !isInsidePlayArea) return; 
 
     const initMap = async () => {
-      const initialCenter = userLocation
-        ? [userLocation.lng, userLocation.lat]
-        : [MAP_CENTER.lng, MAP_CENTER.lat]; // Use MAP_CENTER as fallback
-
       if (!window.GalliMapPlugin) {
         const script = document.createElement("script");
         script.src = "https://gallimap.com/static/dist/js/gallimaps.vector.min.latest.js";
@@ -322,7 +337,7 @@ export default function FastMapComponent({
         map: {
           container: "galli-map",
           style: "https://map-init.gallimap.com/styles/light/style.json",
-          center: initialCenter,
+          center: [userLocation.lng, userLocation.lat],
           zoom: 16,
           minZoom: 14,
           maxZoom: 21,
@@ -358,12 +373,8 @@ export default function FastMapComponent({
 
       } catch { }
     };
-    
-    // Map initialization now only depends on rule acceptance being checked
-    if (!checkingRulesStatus && rulesAccepted) {
-    	initMap();
-    }
 
+    initMap();
 
     return () => {
       resizeObserverRef.current?.disconnect();
@@ -371,9 +382,8 @@ export default function FastMapComponent({
       mapInstanceRef.current?.map?.remove();
       mapInstanceRef.current = null;
     };
-  }, [rulesAccepted, checkingRulesStatus, userLocation]); // userLocation added as a dependency for initial center
+  }, [userLocation, isInsidePlayArea]); // Restored isInsidePlayArea dependency
 
-  // QR Marker Logic (unaffected)
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current) return;
     const map = mapInstanceRef.current.map;
@@ -448,7 +458,7 @@ export default function FastMapComponent({
     );
   }
 
-  // RENDER: Rules screen FIRST
+  // RENDER: Rules screen FIRST (before location check)
   if (!rulesAccepted) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 p-4">
@@ -491,7 +501,7 @@ export default function FastMapComponent({
     );
   }
 
-  // RENDER: Main map view (now unconditional after rules are accepted)
+  // RENDER: Main map view (Original Logic restored, but default state is true)
   return (
     <div ref={mapContainerRef} style={{ width: "100%", height: "100vh", position: "relative" }}>
       <div id="galli-map" style={{ width: "100%", height: "100%" }} />
@@ -504,8 +514,7 @@ export default function FastMapComponent({
         <img src="/images/playericon.png" className="w-10 h-10" alt="Player" />
       </button>
 
-      {/* Removed isInsidePlayArea check for the main menu */}
-      {mapReady && !scanning && !scannedData && (
+      {isInsidePlayArea && mapReady && !scanning && !scannedData && (
         <div className="fixed bottom-3 sm:bottom-4 left-1/2 transform -translate-x-1/2 flex justify-between items-center w-[70%] sm:w-[60%] max-w-md bg-white p-2 sm:p-3 rounded-full shadow-lg z-50">
           <Link href="/leaderboard" className="group p-2 sm:p-3 rounded-full hover:bg-black transition">
             <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" className="sm:w-6 sm:h-6 text-black group-hover:text-white">
@@ -611,7 +620,22 @@ export default function FastMapComponent({
         </>
       )}
 
-      {/* Removed showTooFarPopup rendering entirely */}
+      {showTooFarPopup && (
+        <>
+          <div className="fixed inset-0 bg-black/90 z-[1003]" />
+          <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-3xl p-10 w-11/12 max-w-md text-center shadow-2xl z-[1004]">
+            <img src="/animation/confuse.gif" alt="Too far" className="w-32 mx-auto mb-6" />
+            <h1 className="text-3xl font-bold text-red-600 mb-4">You're Too Far!</h1>
+            <p className="text-lg mb-6 text-black">Come within 1km of Thamel to play</p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="w-full bg-black text-white px-8 py-3 rounded-full text-lg font-bold hover:bg-gray-800 transition"
+            >
+              Try Again
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
