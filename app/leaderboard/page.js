@@ -64,8 +64,11 @@ export default function Leaderboard() {
         profile_image: data[uid].profile_image || null,
       }));
 
+      // Filter out players with 0 points
+      const filteredPlayers = players.filter((player) => player.points > 0);
+
       // Sort by points → then fastest time
-      const sorted = players.sort((a, b) => {
+      const sorted = filteredPlayers.sort((a, b) => {
         if (b.points !== a.points) return b.points - a.points;
         const parseTime = (t) => {
           if (!t || t === "—") return Infinity;
@@ -117,6 +120,9 @@ export default function Leaderboard() {
               </h1>
               <p className="text-gray-600 text-sm font-medium">
                 Ranked by Points | Ties broken by fastest time
+              </p>
+              <p className="text-red-500 text-xs italic mt-2">
+                Updates periodically — changes may take a few minutes to appear.
               </p>
             </div>
           </div>
